@@ -5,10 +5,14 @@
         "title": "Ajouter un volet temporisé",
         "data": {
           "name": "Nom",
-          "open_switch_entity_id": "Entité interrupteur ouverture",
-          "close_switch_entity_id": "Entité interrupteur fermeture",
+          "open_switch_entity_id": "Interrupteur ouverture",
+          "close_switch_entity_id": "Interrupteur fermeture",
+          "stop_switch_entity_id": "Interrupteur stop (optionnel)",
           "travelling_time_down": "Temps de descente (secondes)",
-          "travelling_time_up": "Temps de montée (secondes)"
+          "travelling_time_up": "Temps de montée (secondes)",
+          "button_auto_return_time": "Durée impulsion logicielle (secondes, 0 = maintenu)",
+          "send_stop_at_end": "Envoyer stop en fin de course",
+          "impulse_mode": "Mode impulsion externe (le relay gère lui-même le retour à OFF)"
         }
       }
     },
@@ -21,13 +25,16 @@
       "init": {
         "title": "Modifier le volet temporisé",
         "data": {
-          "open_switch_entity_id": "Entité interrupteur ouverture",
-          "close_switch_entity_id": "Entité interrupteur fermeture",
+          "open_switch_entity_id": "Interrupteur ouverture",
+          "close_switch_entity_id": "Interrupteur fermeture",
+          "stop_switch_entity_id": "Interrupteur stop (optionnel)",
           "travelling_time_down": "Temps de descente (secondes)",
-          "travelling_time_up": "Temps de montée (secondes)"
+          "travelling_time_up": "Temps de montée (secondes)",
+          "button_auto_return_time": "Durée impulsion logicielle (secondes, 0 = maintenu)",
+          "send_stop_at_end": "Envoyer stop en fin de course",
+          "impulse_mode": "Mode impulsion externe (le relay gère lui-même le retour à OFF)"
         }
       }
     }
   }
 }
-

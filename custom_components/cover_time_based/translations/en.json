@@ -7,8 +7,12 @@
           "name": "Name",
           "open_switch_entity_id": "Open switch entity",
           "close_switch_entity_id": "Close switch entity",
+          "stop_switch_entity_id": "Stop switch entity (optional)",
           "travelling_time_down": "Travel time down (seconds)",
-          "travelling_time_up": "Travel time up (seconds)"
+          "travelling_time_up": "Travel time up (seconds)",
+          "button_auto_return_time": "Software pulse duration (seconds, 0 = sustained)",
+          "send_stop_at_end": "Send stop command at end of travel",
+          "impulse_mode": "External impulse mode (relay manages its own return to OFF)"
         }
       }
     },
@@ -23,11 +27,14 @@
         "data": {
           "open_switch_entity_id": "Open switch entity",
           "close_switch_entity_id": "Close switch entity",
+          "stop_switch_entity_id": "Stop switch entity (optional)",
           "travelling_time_down": "Travel time down (seconds)",
-          "travelling_time_up": "Travel time up (seconds)"
+          "travelling_time_up": "Travel time up (seconds)",
+          "button_auto_return_time": "Software pulse duration (seconds, 0 = sustained)",
+          "send_stop_at_end": "Send stop command at end of travel",
+          "impulse_mode": "External impulse mode (relay manages its own return to OFF)"
         }
       }
     }
   }
 }
-

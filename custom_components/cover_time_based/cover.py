@@ -1,5 +1,6 @@
 """Cover Time Based."""
 import logging
+import asyncio
 from datetime import datetime, timedelta
 
 import voluptuous as vol
@@ -33,6 +34,14 @@ DEFAULT_TRAVEL_TIME = 25
 
 CONF_OPEN_SWITCH_ENTITY_ID = 'open_switch_entity_id'
 CONF_CLOSE_SWITCH_ENTITY_ID = 'close_switch_entity_id'
+CONF_STOP_SWITCH_ENTITY_ID = 'stop_switch_entity_id'
+CONF_BUTTON_AUTO_RETURN_TIME = 'button_auto_return_time'
+CONF_SEND_STOP_AT_END = 'send_stop_at_end'
+CONF_IMPULSE_MODE = 'impulse_mode'
+
+DEFAULT_BUTTON_AUTO_RETURN_TIME = 0   # 0 = pas d'auto-retour
+DEFAULT_SEND_STOP_AT_END = False
+DEFAULT_IMPULSE_MODE = True
 
 PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
     {
@@ -42,12 +51,19 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
                     vol.Optional(CONF_NAME): cv.string,
                     vol.Optional(CONF_OPEN_SWITCH_ENTITY_ID): cv.string,
                     vol.Optional(CONF_CLOSE_SWITCH_ENTITY_ID): cv.string,
+                    vol.Optional(CONF_STOP_SWITCH_ENTITY_ID): cv.string,
                     vol.Optional(CONF_ALIASES, default=[]):
                         vol.All(cv.ensure_list, [cv.string]),
                     vol.Optional(CONF_TRAVELLING_TIME_DOWN, default=DEFAULT_TRAVEL_TIME):
                         cv.positive_int,
                     vol.Optional(CONF_TRAVELLING_TIME_UP, default=DEFAULT_TRAVEL_TIME):
                         cv.positive_int,
+                    vol.Optional(CONF_BUTTON_AUTO_RETURN_TIME, default=DEFAULT_BUTTON_AUTO_RETURN_TIME):
+                        vol.All(vol.Coerce(int), vol.Range(min=0)),
+                    vol.Optional(CONF_SEND_STOP_AT_END, default=DEFAULT_SEND_STOP_AT_END):
+                        cv.boolean,
+                    vol.Optional(CONF_IMPULSE_MODE, default=DEFAULT_IMPULSE_MODE):
+                        cv.boolean,
                 }
             }
         ),
@@ -143,6 +159,10 @@ def devices_from_config(domain_config):
         travel_time_up = config.pop(CONF_TRAVELLING_TIME_UP)
         open_switch_entity_id = config.pop(CONF_OPEN_SWITCH_ENTITY_ID)
         close_switch_entity_id = config.pop(CONF_CLOSE_SWITCH_ENTITY_ID)
+        stop_switch_entity_id = config.pop(CONF_STOP_SWITCH_ENTITY_ID, None)
+        button_auto_return_time = config.pop(CONF_BUTTON_AUTO_RETURN_TIME, DEFAULT_BUTTON_AUTO_RETURN_TIME)
+        send_stop_at_end = config.pop(CONF_SEND_STOP_AT_END, DEFAULT_SEND_STOP_AT_END)
+        impulse_mode = config.pop(CONF_IMPULSE_MODE, DEFAULT_IMPULSE_MODE)
         device = CoverTimeBased(
             device_id=device_id,
             name=name,
@@ -150,6 +170,10 @@ def devices_from_config(domain_config):
             travel_time_up=travel_time_up,
             open_switch_entity_id=open_switch_entity_id,
             close_switch_entity_id=close_switch_entity_id,
+            stop_switch_entity_id=stop_switch_entity_id,
+            button_auto_return_time=button_auto_return_time,
+            send_stop_at_end=send_stop_at_end,
+            impulse_mode=impulse_mode,
             unique_id=device_id,
         )
         devices.append(device)
@@ -171,6 +195,10 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
         travel_time_up=data.get(CONF_TRAVELLING_TIME_UP, DEFAULT_TRAVEL_TIME),
         open_switch_entity_id=data[CONF_OPEN_SWITCH_ENTITY_ID],
         close_switch_entity_id=data[CONF_CLOSE_SWITCH_ENTITY_ID],
+        stop_switch_entity_id=data.get(CONF_STOP_SWITCH_ENTITY_ID),
+        button_auto_return_time=data.get(CONF_BUTTON_AUTO_RETURN_TIME, DEFAULT_BUTTON_AUTO_RETURN_TIME),
+        send_stop_at_end=data.get(CONF_SEND_STOP_AT_END, DEFAULT_SEND_STOP_AT_END),
+        impulse_mode=data.get(CONF_IMPULSE_MODE, DEFAULT_IMPULSE_MODE),
         unique_id=config_entry.unique_id or config_entry.entry_id,
     )
     async_add_entities([device])
@@ -179,12 +207,21 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
 class CoverTimeBased(CoverEntity, RestoreEntity):
 
     def __init__(self, device_id, name, travel_time_down, travel_time_up,
-                 open_switch_entity_id, close_switch_entity_id, unique_id=None):
+                 open_switch_entity_id, close_switch_entity_id,
+                 stop_switch_entity_id=None,
+                 button_auto_return_time=DEFAULT_BUTTON_AUTO_RETURN_TIME,
+                 send_stop_at_end=DEFAULT_SEND_STOP_AT_END,
+                 impulse_mode=DEFAULT_IMPULSE_MODE,
+                 unique_id=None):
         """Initialize the cover."""
         self._travel_time_down = travel_time_down
         self._travel_time_up = travel_time_up
         self._open_switch_entity_id = open_switch_entity_id
         self._close_switch_entity_id = close_switch_entity_id
+        self._stop_switch_entity_id = stop_switch_entity_id
+        self._button_auto_return_time = button_auto_return_time
+        self._send_stop_at_end = send_stop_at_end
+        self._impulse_mode = impulse_mode
         self._name = name if name else device_id
         self._unique_id = unique_id or device_id
         self._unsubscribe_auto_updater = None
@@ -226,6 +263,9 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
             attr[CONF_TRAVELLING_TIME_DOWN] = self._travel_time_down
         if self._travel_time_up is not None:
             attr[CONF_TRAVELLING_TIME_UP] = self._travel_time_up
+        attr[CONF_BUTTON_AUTO_RETURN_TIME] = self._button_auto_return_time
+        attr[CONF_SEND_STOP_AT_END] = self._send_stop_at_end
+        attr[CONF_IMPULSE_MODE] = self._impulse_mode
         return attr
 
     @property
@@ -332,50 +372,68 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
     async def auto_stop_if_necessary(self):
         """Do auto stop if necessary."""
         if self.position_reached():
-            _LOGGER.debug('auto_stop_if_necessary :: calling stop command')
-            await self._async_handle_command(SERVICE_STOP_COVER)
             self.tc.stop()
+            if self._send_stop_at_end:
+                _LOGGER.debug('auto_stop_if_necessary :: calling stop command')
+                await self._async_handle_command(SERVICE_STOP_COVER)
+            else:
+                _LOGGER.debug('auto_stop_if_necessary :: send_stop_at_end=False, skipping stop command')
+                self.async_write_ha_state()
+
+    async def _async_turn_on_with_auto_return(self, entity_id: str) -> None:
+        """Turn on a switch and schedule auto-return to OFF if configured.
+
+        In impulse_mode the relay manages the pulse itself, so we only send turn_on.
+        When button_auto_return_time > 0 (software pulse), we turn off after the delay.
+        Otherwise the switch stays ON until an explicit turn_off.
+        """
+        await self.hass.services.async_call(
+            "homeassistant", "turn_on",
+            service_data={"entity_id": entity_id},
+            blocking=True,
+        )
+        if not self._impulse_mode and self._button_auto_return_time > 0:
+            async def _turn_off_later():
+                await asyncio.sleep(self._button_auto_return_time)
+                await self.hass.services.async_call(
+                    "homeassistant", "turn_off",
+                    service_data={"entity_id": entity_id},
+                    blocking=True,
+                )
+            self.hass.async_create_task(_turn_off_later())
+
+    async def _async_turn_off_switch(self, entity_id: str) -> None:
+        """Turn off a switch, unless in impulse_mode (relay already returned to OFF)."""
+        if self._impulse_mode:
+            _LOGGER.debug('_async_turn_off_switch :: impulse_mode, skipping turn_off on %s', entity_id)
+            return
+        await self.hass.services.async_call(
+            "homeassistant", "turn_off",
+            service_data={"entity_id": entity_id},
+            blocking=True,
+        )
 
     async def _async_handle_command(self, command, *args):
         if command == SERVICE_CLOSE_COVER:
             cmd = "DOWN"
             self._state = False
-            await self.hass.services.async_call(
-                "homeassistant", "turn_off",
-                service_data={"entity_id": self._open_switch_entity_id},
-                blocking=True,
-            )
-            await self.hass.services.async_call(
-                "homeassistant", "turn_on",
-                service_data={"entity_id": self._close_switch_entity_id},
-                blocking=True,
-            )
+            await self._async_turn_off_switch(self._open_switch_entity_id)
+            await self._async_turn_on_with_auto_return(self._close_switch_entity_id)
+
         elif command == SERVICE_OPEN_COVER:
             cmd = "UP"
             self._state = True
-            await self.hass.services.async_call(
-                "homeassistant", "turn_off",
-                service_data={"entity_id": self._close_switch_entity_id},
-                blocking=True,
-            )
-            await self.hass.services.async_call(
-                "homeassistant", "turn_on",
-                service_data={"entity_id": self._open_switch_entity_id},
-                blocking=True,
-            )
+            await self._async_turn_off_switch(self._close_switch_entity_id)
+            await self._async_turn_on_with_auto_return(self._open_switch_entity_id)
+
         elif command == SERVICE_STOP_COVER:
             cmd = "STOP"
             self._state = True
-            await self.hass.services.async_call(
-                "homeassistant", "turn_off",
-                service_data={"entity_id": self._close_switch_entity_id},
-                blocking=True,
-            )
-            await self.hass.services.async_call(
-                "homeassistant", "turn_off",
-                service_data={"entity_id": self._open_switch_entity_id},
-                blocking=True,
-            )
+            await self._async_turn_off_switch(self._close_switch_entity_id)
+            await self._async_turn_off_switch(self._open_switch_entity_id)
+            # Si un switch stop dédié est configuré, on le pulse
+            if self._stop_switch_entity_id:
+                await self._async_turn_on_with_auto_return(self._stop_switch_entity_id)
         else:
             cmd = "UNKNOWN"
 
