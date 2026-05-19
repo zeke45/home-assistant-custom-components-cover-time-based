@@ -1,0 +1,33 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Add Time Based Cover",
+        "data": {
+          "name": "Name",
+          "open_switch_entity_id": "Open switch entity",
+          "close_switch_entity_id": "Close switch entity",
+          "travelling_time_down": "Travel time down (seconds)",
+          "travelling_time_up": "Travel time up (seconds)"
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "This cover is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Edit Time Based Cover",
+        "data": {
+          "open_switch_entity_id": "Open switch entity",
+          "close_switch_entity_id": "Close switch entity",
+          "travelling_time_down": "Travel time down (seconds)",
+          "travelling_time_up": "Travel time up (seconds)"
+        }
+      }
+    }
+  }
+}
+

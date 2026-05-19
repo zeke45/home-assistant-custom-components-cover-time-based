@@ -1,0 +1,33 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Ajouter un volet temporisé",
+        "data": {
+          "name": "Nom",
+          "open_switch_entity_id": "Entité interrupteur ouverture",
+          "close_switch_entity_id": "Entité interrupteur fermeture",
+          "travelling_time_down": "Temps de descente (secondes)",
+          "travelling_time_up": "Temps de montée (secondes)"
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "Ce volet est déjà configuré."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Modifier le volet temporisé",
+        "data": {
+          "open_switch_entity_id": "Entité interrupteur ouverture",
+          "close_switch_entity_id": "Entité interrupteur fermeture",
+          "travelling_time_down": "Temps de descente (secondes)",
+          "travelling_time_up": "Temps de montée (secondes)"
+        }
+      }
+    }
+  }
+}
+
