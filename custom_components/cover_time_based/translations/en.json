@@ -1,0 +1,82 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Add Time Based Cover",
+        "data": {
+          "name": "Name",
+          "control_type": "Control type"
+        },
+        "data_description": {
+          "control_type": "Switch: ON/OFF relay. Script: RF one-shot pulse. Cover: delegate to an existing HA cover entity."
+        }
+      },
+      "control": {
+        "title": "Control configuration",
+        "data": {
+          "open_switch_entity_id": "Open switch entity",
+          "close_switch_entity_id": "Close switch entity",
+          "stop_switch_entity_id": "Stop switch entity (optional)",
+          "impulse_mode": "External impulse mode (relay manages its own return to OFF)",
+          "button_auto_return_time": "Software pulse duration (seconds, 0 = sustained)",
+          "open_script_entity_id": "Open script entity",
+          "close_script_entity_id": "Close script entity",
+          "stop_script_entity_id": "Stop script entity (optional)",
+          "cover_entity_id": "Cover entity to control",
+          "travelling_time_down": "Travel time down (seconds)",
+          "travelling_time_up": "Travel time up (seconds)",
+          "send_stop_at_end": "Send stop at full end position (0% or 100%)",
+          "device_class": "Device class (optional)",
+          "availability_template": "Availability template (optional)"
+        },
+        "data_description": {
+          "impulse_mode": "When enabled, HA only sends turn_on; the physical relay manages its own return to OFF.",
+          "button_auto_return_time": "0 = switch stays ON during movement. Ignored when external impulse mode is enabled.",
+          "send_stop_at_end": "Stop at intermediate positions (1–99%) is always sent unconditionally. This option only affects full end positions.",
+          "availability_template": "E.g.: {{ states('sensor.gateway') == 'online' }}",
+          "device_class": "Determines the icon and states displayed in the UI."
+        }
+      }
+    },
+    "error": {
+      "travel_time_too_low": "Travel time must be at least 1 second.",
+      "switch_required": "Open and close switch entities are required."
+    },
+    "abort": {
+      "already_configured": "This cover is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Edit Time Based Cover",
+        "data": {
+          "open_switch_entity_id": "Open switch entity",
+          "close_switch_entity_id": "Close switch entity",
+          "stop_switch_entity_id": "Stop switch entity (optional)",
+          "impulse_mode": "External impulse mode (relay manages its own return to OFF)",
+          "button_auto_return_time": "Software pulse duration (seconds, 0 = sustained)",
+          "open_script_entity_id": "Open script entity",
+          "close_script_entity_id": "Close script entity",
+          "stop_script_entity_id": "Stop script entity (optional)",
+          "cover_entity_id": "Cover entity to control",
+          "travelling_time_down": "Travel time down (seconds)",
+          "travelling_time_up": "Travel time up (seconds)",
+          "send_stop_at_end": "Send stop at full end position (0% or 100%)",
+          "device_class": "Device class (optional)",
+          "availability_template": "Availability template (optional)"
+        },
+        "data_description": {
+          "impulse_mode": "When enabled, HA only sends turn_on; the physical relay manages its own return to OFF.",
+          "button_auto_return_time": "0 = switch stays ON. Ignored when external impulse mode is enabled.",
+          "send_stop_at_end": "Intermediate stop (1–99%) always sent. This option only affects 0% and 100%.",
+          "availability_template": "E.g.: {{ states('sensor.gateway') == 'online' }}"
+        }
+      }
+    },
+    "error": {
+      "travel_time_too_low": "Travel time must be at least 1 second.",
+      "switch_required": "Open and close switch entities are required."
+    }
+  }
+}

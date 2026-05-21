@@ -1,6 +1,3 @@
-  
-send_command:
-  description: Send device command through Cover.
-  fields:
-    command: {description: The command to be sent., example: 'open_cover'}
-    device_id: {description: device ID.}
+# services.yaml — aucun service custom enregistré pour le moment.
+# Le service send_command (vestige de l'ancienne version) a été supprimé
+# car il n'était jamais enregistré dans le code.

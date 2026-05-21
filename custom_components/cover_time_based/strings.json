@@ -1,0 +1,82 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Ajouter un volet temporisé",
+        "data": {
+          "name": "Nom",
+          "control_type": "Type de contrôle"
+        },
+        "data_description": {
+          "control_type": "Switch : relais ON/OFF. Script : impulsion RF one-shot. Cover : délégation vers un cover HA existant."
+        }
+      },
+      "control": {
+        "title": "Configuration du contrôle",
+        "data": {
+          "open_switch_entity_id": "Interrupteur ouverture",
+          "close_switch_entity_id": "Interrupteur fermeture",
+          "stop_switch_entity_id": "Interrupteur stop (optionnel)",
+          "impulse_mode": "Mode impulsion externe (le relay gère lui-même le retour à OFF)",
+          "button_auto_return_time": "Durée impulsion logicielle (secondes, 0 = maintenu)",
+          "open_script_entity_id": "Script ouverture",
+          "close_script_entity_id": "Script fermeture",
+          "stop_script_entity_id": "Script stop (optionnel)",
+          "cover_entity_id": "Entité cover à contrôler",
+          "travelling_time_down": "Temps de descente (secondes)",
+          "travelling_time_up": "Temps de montée (secondes)",
+          "send_stop_at_end": "Envoyer stop en fin de course complète (0% ou 100%)",
+          "device_class": "Classe d'appareil (optionnel)",
+          "availability_template": "Template de disponibilité (optionnel)"
+        },
+        "data_description": {
+          "impulse_mode": "Activé : HA envoie uniquement turn_on, le relay gère son retour à OFF.",
+          "button_auto_return_time": "0 = switch maintenu pendant tout le déplacement. Ignoré si mode impulsion externe activé.",
+          "send_stop_at_end": "Stop automatique en position intermédiaire (1–99%) est toujours envoyé. Cette option ne concerne que les fins de course complètes.",
+          "availability_template": "Ex : {{ states('sensor.gateway') == 'online' }}",
+          "device_class": "Détermine l'icône et les états affichés dans l'UI."
+        }
+      }
+    },
+    "error": {
+      "travel_time_too_low": "Le temps de déplacement doit être d'au moins 1 seconde.",
+      "switch_required": "L'interrupteur d'ouverture et de fermeture sont obligatoires."
+    },
+    "abort": {
+      "already_configured": "Ce volet est déjà configuré."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Modifier le volet temporisé",
+        "data": {
+          "open_switch_entity_id": "Interrupteur ouverture",
+          "close_switch_entity_id": "Interrupteur fermeture",
+          "stop_switch_entity_id": "Interrupteur stop (optionnel)",
+          "impulse_mode": "Mode impulsion externe (le relay gère lui-même le retour à OFF)",
+          "button_auto_return_time": "Durée impulsion logicielle (secondes, 0 = maintenu)",
+          "open_script_entity_id": "Script ouverture",
+          "close_script_entity_id": "Script fermeture",
+          "stop_script_entity_id": "Script stop (optionnel)",
+          "cover_entity_id": "Entité cover à contrôler",
+          "travelling_time_down": "Temps de descente (secondes)",
+          "travelling_time_up": "Temps de montée (secondes)",
+          "send_stop_at_end": "Envoyer stop en fin de course complète (0% ou 100%)",
+          "device_class": "Classe d'appareil (optionnel)",
+          "availability_template": "Template de disponibilité (optionnel)"
+        },
+        "data_description": {
+          "impulse_mode": "Activé : HA envoie uniquement turn_on, le relay gère son retour à OFF.",
+          "button_auto_return_time": "0 = switch maintenu. Ignoré si mode impulsion externe activé.",
+          "send_stop_at_end": "Stop intermédiaire (1–99%) toujours envoyé. Cette option ne concerne que 0% et 100%.",
+          "availability_template": "Ex : {{ states('sensor.gateway') == 'online' }}"
+        }
+      }
+    },
+    "error": {
+      "travel_time_too_low": "Le temps de déplacement doit être d'au moins 1 seconde.",
+      "switch_required": "L'interrupteur d'ouverture et de fermeture sont obligatoires."
+    }
+  }
+}
