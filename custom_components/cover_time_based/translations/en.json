@@ -26,6 +26,7 @@
           "travelling_time_down": "Travel time down (seconds)",
           "travelling_time_up": "Travel time up (seconds)",
           "send_stop_at_end": "Send stop at full end position (0% or 100%)",
+          "command_delay": "Command delay (ms, 0 = immediate)",
           "device_class": "Device class (optional)",
           "availability_template": "Availability template (optional)"
         },
@@ -33,6 +34,7 @@
           "impulse_mode": "When enabled, HA only sends turn_on; the physical relay manages its own return to OFF.",
           "button_auto_return_time": "0 = switch stays ON during movement. Ignored when external impulse mode is enabled.",
           "send_stop_at_end": "Stop at intermediate positions (1–99%) is always sent unconditionally. This option only affects full end positions.",
+          "command_delay": "Delay in milliseconds applied before each physical command (open, close, stop).",
           "availability_template": "E.g.: {{ states('sensor.gateway') == 'online' }}",
           "device_class": "Determines the icon and states displayed in the UI."
         }
@@ -49,6 +51,15 @@
   "options": {
     "step": {
       "init": {
+        "title": "Change control type",
+        "data": {
+          "control_type": "Control type"
+        },
+        "data_description": {
+          "control_type": "Changing the type will reconfigure the associated entities in the next step."
+        }
+      },
+      "options": {
         "title": "Edit Time Based Cover",
         "data": {
           "open_switch_entity_id": "Open switch entity",
@@ -63,6 +74,7 @@
           "travelling_time_down": "Travel time down (seconds)",
           "travelling_time_up": "Travel time up (seconds)",
           "send_stop_at_end": "Send stop at full end position (0% or 100%)",
+          "command_delay": "Command delay (ms, 0 = immediate)",
           "device_class": "Device class (optional)",
           "availability_template": "Availability template (optional)"
         },
@@ -70,6 +82,7 @@
           "impulse_mode": "When enabled, HA only sends turn_on; the physical relay manages its own return to OFF.",
           "button_auto_return_time": "0 = switch stays ON. Ignored when external impulse mode is enabled.",
           "send_stop_at_end": "Intermediate stop (1–99%) always sent. This option only affects 0% and 100%.",
+          "command_delay": "Delay in milliseconds applied before each physical command.",
           "availability_template": "E.g.: {{ states('sensor.gateway') == 'online' }}"
         }
       }

@@ -1,7 +1,7 @@
 # Cover Time Based Component
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
-![version](https://img.shields.io/badge/version-2.3.0-blue)
+![version](https://img.shields.io/badge/version-2.4.0-blue)
 ![maintained](https://img.shields.io/badge/maintained-yes-green)
 ![license](https://img.shields.io/badge/license-MIT-green)
 
@@ -19,12 +19,13 @@ Prend en charge les relais ON/OFF (switch), les scripts RF impulsionnels et la d
 - 📍 **Positionnement précis** (1-100%) par calcul temporel
 - ⛔ **Stop inconditionnel** en position intermédiaire (1-99%)
 - 🏷️ **Device class** configurable (shutter, blind, curtain, garage...)
-- 🔌 **Template de disponibilité** (ex: gateway Zigbee en ligne)
+- 🔌 **Template de disponibilité** (ex: gateway Zigbee en ligne) avec gestion robuste des erreurs
 - 💾 **Restauration de position** au redémarrage HA
 - ⚠️ **Détection position incertaine** si HA redémarre pendant un déplacement
 - 🖥️ **Configuration UI** complète (sans YAML obligatoire)
 - 🔄 **Rechargement automatique** à chaque modification des options
 - ⏳ **Délai de commande** configurable (ms) pour échelonner les commandes simultanées
+- 🔀 **Changement de type de contrôle** possible depuis les options UI (sans recréer l'intégration)
 
 ---
 
@@ -52,8 +53,15 @@ Prend en charge les relais ON/OFF (switch), les scripts RF impulsionnels et la d
 [![Open your Home Assistant instance and add an integration.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=cover_time_based)
 
 1. **Paramètres → Appareils et services → Ajouter une intégration** → recherchez **Cover Time Based**
-2. **Étape 1** : Nom + type de contrôle
-3. **Étape 2** : Entités et options
+2. **Étape 1** : Nom + type de contrôle (`switch`, `script` ou `cover`)
+3. **Étape 2** : Entités et options (temps de parcours, délai, classe d'appareil, template de disponibilité…)
+
+### Modifier une intégration existante
+
+Depuis **Paramètres → Appareils et services → Cover Time Based → Configurer** :
+
+1. **Étape 1** : Choisissez le type de contrôle (peut être changé à la volée)
+2. **Étape 2** : Mettez à jour les entités et options
 
 ---
 
@@ -149,7 +157,8 @@ cover:
 ```
 
 > ℹ️ Le délai s'applique aux commandes **open**, **close**, **stop** et **set_position**.  
-> La valeur est en **millisecondes** (0 à 10 000). Par défaut : `0` (comportement inchangé).
+> La valeur est en **millisecondes** (0 à 10 000). Par défaut : `0` (comportement inchangé).  
+> Ce paramètre est également disponible dans l'UI (options de l'intégration).
 
 ---
 
@@ -186,6 +195,18 @@ cover:
 | `cover.close_cover` | Ferme le volet |
 | `cover.stop_cover` | Arrête le volet |
 | `cover.set_cover_position` | Positionne le volet à X% (ex: 50%) |
+
+---
+
+## 🗂️ Architecture du code
+
+| Fichier | Rôle |
+|---|---|
+| `const.py` | Toutes les constantes partagées (source unique de vérité) |
+| `travel_calculator.py` | Calcul temporel de position (`TravelCalculator`) — sans dépendance HA |
+| `cover.py` | Entité `CoverTimeBased` — logique HA |
+| `config_flow.py` | Flux de configuration et d'options UI |
+| `__init__.py` | Setup, unload, migration de version |
 
 ---
 

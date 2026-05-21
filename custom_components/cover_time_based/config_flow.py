@@ -7,38 +7,34 @@ from homeassistant import config_entries
 from homeassistant.const import CONF_NAME
 from homeassistant.helpers import selector
 
-DOMAIN = "cover_time_based"
-
-# Keys
-CONF_CONTROL_TYPE            = "control_type"
-CONF_TRAVELLING_TIME_DOWN    = "travelling_time_down"
-CONF_TRAVELLING_TIME_UP      = "travelling_time_up"
-CONF_OPEN_SWITCH_ENTITY_ID   = "open_switch_entity_id"
-CONF_CLOSE_SWITCH_ENTITY_ID  = "close_switch_entity_id"
-CONF_STOP_SWITCH_ENTITY_ID   = "stop_switch_entity_id"
-CONF_BUTTON_AUTO_RETURN_TIME = "button_auto_return_time"
-CONF_SEND_STOP_AT_END        = "send_stop_at_end"
-CONF_IMPULSE_MODE            = "impulse_mode"
-CONF_OPEN_SCRIPT_ENTITY_ID   = "open_script_entity_id"
-CONF_CLOSE_SCRIPT_ENTITY_ID  = "close_script_entity_id"
-CONF_STOP_SCRIPT_ENTITY_ID   = "stop_script_entity_id"
-CONF_COVER_ENTITY_ID         = "cover_entity_id"
-CONF_DEVICE_CLASS            = "device_class"
-CONF_AVAILABILITY_TEMPLATE   = "availability_template"
-
-CONTROL_TYPE_SWITCH = "switch"
-CONTROL_TYPE_SCRIPT = "script"
-CONTROL_TYPE_COVER  = "cover"
-
-DEFAULT_TRAVEL_TIME          = 25
-DEFAULT_BUTTON_AUTO_RETURN_TIME = 0
-DEFAULT_SEND_STOP_AT_END     = False
-DEFAULT_IMPULSE_MODE         = True
-
-COVER_DEVICE_CLASSES = [
-    "awning", "blind", "curtain", "damper", "door",
-    "garage", "gate", "shade", "shutter", "window",
-]
+from .const import (
+    CONF_AVAILABILITY_TEMPLATE,
+    CONF_BUTTON_AUTO_RETURN_TIME,
+    CONF_CLOSE_SCRIPT_ENTITY_ID,
+    CONF_CLOSE_SWITCH_ENTITY_ID,
+    CONF_COMMAND_DELAY,
+    CONF_CONTROL_TYPE,
+    CONF_COVER_ENTITY_ID,
+    CONF_DEVICE_CLASS,
+    CONF_IMPULSE_MODE,
+    CONF_OPEN_SCRIPT_ENTITY_ID,
+    CONF_OPEN_SWITCH_ENTITY_ID,
+    CONF_SEND_STOP_AT_END,
+    CONF_STOP_SCRIPT_ENTITY_ID,
+    CONF_STOP_SWITCH_ENTITY_ID,
+    CONF_TRAVELLING_TIME_DOWN,
+    CONF_TRAVELLING_TIME_UP,
+    CONTROL_TYPE_COVER,
+    CONTROL_TYPE_SCRIPT,
+    CONTROL_TYPE_SWITCH,
+    COVER_DEVICE_CLASSES,
+    DEFAULT_BUTTON_AUTO_RETURN_TIME,
+    DEFAULT_COMMAND_DELAY,
+    DEFAULT_IMPULSE_MODE,
+    DEFAULT_SEND_STOP_AT_END,
+    DEFAULT_TRAVEL_TIME,
+    DOMAIN,
+)
 
 # Timing + common schema (shared between all control types)
 def _build_common_schema(data: dict) -> dict:
@@ -49,6 +45,8 @@ def _build_common_schema(data: dict) -> dict:
             selector.NumberSelector(selector.NumberSelectorConfig(min=1, max=600, step=1, mode=selector.NumberSelectorMode.BOX)),
         vol.Optional(CONF_SEND_STOP_AT_END, default=data.get(CONF_SEND_STOP_AT_END, DEFAULT_SEND_STOP_AT_END)):
             selector.BooleanSelector(),
+        vol.Optional(CONF_COMMAND_DELAY, default=data.get(CONF_COMMAND_DELAY, DEFAULT_COMMAND_DELAY)):
+            selector.NumberSelector(selector.NumberSelectorConfig(min=0, max=10000, step=1, mode=selector.NumberSelectorMode.BOX)),
         vol.Optional(CONF_DEVICE_CLASS, default=data.get(CONF_DEVICE_CLASS, "")):
             selector.SelectSelector(selector.SelectSelectorConfig(
                 options=[""] + COVER_DEVICE_CLASSES,
@@ -95,13 +93,39 @@ def _build_cover_schema(data: dict) -> vol.Schema:
     })
 
 
+def _build_control_type_schema(current: str) -> vol.Schema:
+    """Return a schema with a control_type selector pre-filled with *current*."""
+    return vol.Schema({
+        vol.Required(CONF_CONTROL_TYPE, default=current):
+            selector.SelectSelector(selector.SelectSelectorConfig(
+                options=[
+                    {"value": CONTROL_TYPE_SWITCH, "label": "Switch (relais ON/OFF)"},
+                    {"value": CONTROL_TYPE_SCRIPT, "label": "Script (impulsion RF / one-shot)"},
+                    {"value": CONTROL_TYPE_COVER,  "label": "Cover (délégation vers un cover existant)"},
+                ],
+                mode=selector.SelectSelectorMode.LIST,
+                translation_key="control_type",
+            )),
+    })
+
+
+def _get_control_schema(control_type: str, data: dict) -> vol.Schema:
+    """Return the schema matching *control_type*."""
+    if control_type == CONTROL_TYPE_SCRIPT:
+        return _build_script_schema(data)
+    if control_type == CONTROL_TYPE_COVER:
+        return _build_cover_schema(data)
+    return _build_switch_schema(data)
+
+
 def _normalize(user_input: dict) -> dict:
     """Normalize user_input: empty strings → None, float → int for time fields."""
     for key in (CONF_STOP_SWITCH_ENTITY_ID, CONF_STOP_SCRIPT_ENTITY_ID,
                 CONF_DEVICE_CLASS, CONF_AVAILABILITY_TEMPLATE):
         if not user_input.get(key):
             user_input[key] = None
-    for key in (CONF_TRAVELLING_TIME_DOWN, CONF_TRAVELLING_TIME_UP, CONF_BUTTON_AUTO_RETURN_TIME):
+    for key in (CONF_TRAVELLING_TIME_DOWN, CONF_TRAVELLING_TIME_UP,
+                CONF_BUTTON_AUTO_RETURN_TIME, CONF_COMMAND_DELAY):
         if key in user_input:
             user_input[key] = int(user_input[key])
     return user_input
@@ -126,16 +150,7 @@ class CoverTimeBasedConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         schema = vol.Schema({
             vol.Required(CONF_NAME): selector.TextSelector(),
-            vol.Required(CONF_CONTROL_TYPE, default=CONTROL_TYPE_SWITCH):
-                selector.SelectSelector(selector.SelectSelectorConfig(
-                    options=[
-                        {"value": CONTROL_TYPE_SWITCH, "label": "Switch (relais ON/OFF)"},
-                        {"value": CONTROL_TYPE_SCRIPT, "label": "Script (impulsion RF / one-shot)"},
-                        {"value": CONTROL_TYPE_COVER,  "label": "Cover (délégation vers un cover existant)"},
-                    ],
-                    mode=selector.SelectSelectorMode.LIST,
-                    translation_key="control_type",
-                )),
+            **_build_control_type_schema(CONTROL_TYPE_SWITCH),
         })
         return self.async_show_form(step_id="user", data_schema=schema, errors=errors)
 
@@ -155,15 +170,8 @@ class CoverTimeBasedConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 options=user_input,
             )
 
-        schema = self._get_control_schema({})
+        schema = _get_control_schema(self._control_type, {})
         return self.async_show_form(step_id="control", data_schema=schema, errors=errors)
-
-    def _get_control_schema(self, data: dict) -> vol.Schema:
-        if self._control_type == CONTROL_TYPE_SCRIPT:
-            return _build_script_schema(data)
-        if self._control_type == CONTROL_TYPE_COVER:
-            return _build_cover_schema(data)
-        return _build_switch_schema(data)
 
     @staticmethod
     def async_get_options_flow(config_entry):
@@ -173,23 +181,34 @@ class CoverTimeBasedConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 class CoverTimeBasedOptionsFlow(config_entries.OptionsFlow):
     """Handle options for Cover Time Based."""
 
+    def __init__(self, config_entry) -> None:
+        self._pending_control_type: str | None = None
+        self._config_entry = config_entry
+
     async def async_step_init(self, user_input=None):
-        """Manage the options (single step, all fields visible)."""
+        """Step 1 of options: allow changing the control type."""
+        data = {**self._config_entry.data, **self._config_entry.options}
+        current_control_type = data.get(CONF_CONTROL_TYPE, CONTROL_TYPE_SWITCH)
+
+        if user_input is not None:
+            self._pending_control_type = user_input[CONF_CONTROL_TYPE]
+            return await self.async_step_options()
+
+        return self.async_show_form(
+            step_id="init",
+            data_schema=_build_control_type_schema(current_control_type),
+        )
+
+    async def async_step_options(self, user_input=None):
+        """Step 2 of options: fields specific to the chosen control type."""
         errors = {}
-        data = {**self.config_entry.data, **self.config_entry.options}
-        control_type = data.get(CONF_CONTROL_TYPE, CONTROL_TYPE_SWITCH)
+        data = {**self._config_entry.data, **self._config_entry.options}
+        control_type = self._pending_control_type or data.get(CONF_CONTROL_TYPE, CONTROL_TYPE_SWITCH)
 
         if user_input is not None:
             user_input = _normalize(user_input)
             user_input[CONF_CONTROL_TYPE] = control_type
             return self.async_create_entry(title="", data=user_input)
 
-        # Build schema based on current control type
-        if control_type == CONTROL_TYPE_SCRIPT:
-            schema = _build_script_schema(data)
-        elif control_type == CONTROL_TYPE_COVER:
-            schema = _build_cover_schema(data)
-        else:
-            schema = _build_switch_schema(data)
-
-        return self.async_show_form(step_id="init", data_schema=schema, errors=errors)
+        schema = _get_control_schema(control_type, data)
+        return self.async_show_form(step_id="options", data_schema=schema, errors=errors)

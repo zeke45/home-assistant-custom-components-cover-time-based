@@ -26,6 +26,7 @@
           "travelling_time_down": "Temps de descente (secondes)",
           "travelling_time_up": "Temps de montée (secondes)",
           "send_stop_at_end": "Envoyer stop en fin de course complète (0% ou 100%)",
+          "command_delay": "Délai avant commande (ms, 0 = immédiat)",
           "device_class": "Classe d'appareil (optionnel)",
           "availability_template": "Template de disponibilité (optionnel)"
         },
@@ -33,6 +34,7 @@
           "impulse_mode": "Activé : HA envoie uniquement turn_on, le relay gère son retour à OFF.",
           "button_auto_return_time": "0 = switch maintenu pendant tout le déplacement. Ignoré si mode impulsion externe activé.",
           "send_stop_at_end": "Stop automatique en position intermédiaire (1–99%) est toujours envoyé. Cette option ne concerne que les fins de course complètes.",
+          "command_delay": "Délai en millisecondes appliqué avant chaque commande physique (ouverture, fermeture, stop).",
           "availability_template": "Ex : {{ states('sensor.gateway') == 'online' }}",
           "device_class": "Détermine l'icône et les états affichés dans l'UI."
         }
@@ -49,7 +51,16 @@
   "options": {
     "step": {
       "init": {
-        "title": "Modifier le volet temporisé",
+        "title": "Modifier le type de contrôle",
+        "data": {
+          "control_type": "Type de contrôle"
+        },
+        "data_description": {
+          "control_type": "Changer le type reconfigure les entités associées à l'étape suivante."
+        }
+      },
+      "options": {
+        "title": "Modifier la configuration du volet",
         "data": {
           "open_switch_entity_id": "Interrupteur ouverture",
           "close_switch_entity_id": "Interrupteur fermeture",
@@ -63,6 +74,7 @@
           "travelling_time_down": "Temps de descente (secondes)",
           "travelling_time_up": "Temps de montée (secondes)",
           "send_stop_at_end": "Envoyer stop en fin de course complète (0% ou 100%)",
+          "command_delay": "Délai avant commande (ms, 0 = immédiat)",
           "device_class": "Classe d'appareil (optionnel)",
           "availability_template": "Template de disponibilité (optionnel)"
         },
@@ -70,6 +82,7 @@
           "impulse_mode": "Activé : HA envoie uniquement turn_on, le relay gère son retour à OFF.",
           "button_auto_return_time": "0 = switch maintenu. Ignoré si mode impulsion externe activé.",
           "send_stop_at_end": "Stop intermédiaire (1–99%) toujours envoyé. Cette option ne concerne que 0% et 100%.",
+          "command_delay": "Délai en millisecondes appliqué avant chaque commande physique.",
           "availability_template": "Ex : {{ states('sensor.gateway') == 'online' }}"
         }
       }
