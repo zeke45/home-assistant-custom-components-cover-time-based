@@ -8,7 +8,7 @@
           "control_type": "Control type"
         },
         "data_description": {
-          "control_type": "Switch: ON/OFF relay. Script: RF one-shot pulse. Cover: delegate to an existing HA cover entity."
+          "control_type": "Switch impulse: relay manages its own return to OFF (RF, Zigbee…). Switch sustained: HA manages activation duration. Script: RF one-shot. Cover: delegation."
         }
       },
       "control": {
@@ -18,7 +18,7 @@
           "close_switch_entity_id": "Close switch entity",
           "stop_switch_entity_id": "Stop switch entity (optional)",
           "impulse_mode": "External impulse mode (relay manages its own return to OFF)",
-          "button_auto_return_time": "Software pulse duration (seconds, 0 = sustained)",
+          "switch_sustained_time": "Sustained activation duration (seconds, 0 = full travel)",
           "open_script_entity_id": "Open script entity",
           "close_script_entity_id": "Close script entity",
           "stop_script_entity_id": "Stop script entity (optional)",
@@ -32,7 +32,7 @@
         },
         "data_description": {
           "impulse_mode": "When enabled, HA only sends turn_on; the physical relay manages its own return to OFF.",
-          "button_auto_return_time": "0 = switch stays ON during movement. Ignored when external impulse mode is enabled.",
+          "switch_sustained_time": "0 = switch stays ON during movement. Ignored when external impulse mode is enabled.",
           "send_stop_at_end": "Stop at intermediate positions (1–99%) is always sent unconditionally. This option only affects full end positions.",
           "command_delay": "Delay in milliseconds applied before each physical command (open, close, stop).",
           "availability_template": "E.g.: {{ states('sensor.gateway') == 'online' }}",
@@ -66,7 +66,7 @@
           "close_switch_entity_id": "Close switch entity",
           "stop_switch_entity_id": "Stop switch entity (optional)",
           "impulse_mode": "External impulse mode (relay manages its own return to OFF)",
-          "button_auto_return_time": "Software pulse duration (seconds, 0 = sustained)",
+          "switch_sustained_time": "Sustained activation duration (seconds, 0 = full travel)",
           "open_script_entity_id": "Open script entity",
           "close_script_entity_id": "Close script entity",
           "stop_script_entity_id": "Stop script entity (optional)",
@@ -80,7 +80,7 @@
         },
         "data_description": {
           "impulse_mode": "When enabled, HA only sends turn_on; the physical relay manages its own return to OFF.",
-          "button_auto_return_time": "0 = switch stays ON. Ignored when external impulse mode is enabled.",
+          "switch_sustained_time": "0 = switch stays ON. Ignored when external impulse mode is enabled.",
           "send_stop_at_end": "Intermediate stop (1–99%) always sent. This option only affects 0% and 100%.",
           "command_delay": "Delay in milliseconds applied before each physical command.",
           "availability_template": "E.g.: {{ states('sensor.gateway') == 'online' }}"

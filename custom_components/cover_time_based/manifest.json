@@ -1,7 +1,7 @@
 {
   "domain": "cover_time_based",
   "name": "Cover Time Based",
-  "version": "2.4.0",
+  "version": "2.5.1",
   "documentation": "https://github.com/zeke45/home-assistant-custom-components-cover-time-based",
   "requirements": [],
   "codeowners": ["@zeke45"],

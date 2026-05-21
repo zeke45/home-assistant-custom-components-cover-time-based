@@ -8,7 +8,7 @@
           "control_type": "Type de contrôle"
         },
         "data_description": {
-          "control_type": "Switch : relais ON/OFF. Script : impulsion RF one-shot. Cover : délégation vers un cover HA existant."
+          "control_type": "Switch impulsion : le relay gère lui-même le retour à OFF (RF, Zigbee…). Switch maintenu : HA gère la durée d'activation. Script : one-shot RF. Cover : délégation."
         }
       },
       "control": {
@@ -18,7 +18,7 @@
           "close_switch_entity_id": "Interrupteur fermeture",
           "stop_switch_entity_id": "Interrupteur stop (optionnel)",
           "impulse_mode": "Mode impulsion externe (le relay gère lui-même le retour à OFF)",
-          "button_auto_return_time": "Durée impulsion logicielle (secondes, 0 = maintenu)",
+          "switch_sustained_time": "Durée activation maintenu (secondes, 0 = toute la durée)",
           "open_script_entity_id": "Script ouverture",
           "close_script_entity_id": "Script fermeture",
           "stop_script_entity_id": "Script stop (optionnel)",
@@ -32,7 +32,7 @@
         },
         "data_description": {
           "impulse_mode": "Activé : HA envoie uniquement turn_on, le relay gère son retour à OFF.",
-          "button_auto_return_time": "0 = switch maintenu pendant tout le déplacement. Ignoré si mode impulsion externe activé.",
+          "switch_sustained_time": "0 = switch maintenu pendant tout le déplacement. Ignoré si mode impulsion externe activé.",
           "send_stop_at_end": "Stop automatique en position intermédiaire (1–99%) est toujours envoyé. Cette option ne concerne que les fins de course complètes.",
           "command_delay": "Délai en millisecondes appliqué avant chaque commande physique (ouverture, fermeture, stop).",
           "availability_template": "Ex : {{ states('sensor.gateway') == 'online' }}",
@@ -66,7 +66,7 @@
           "close_switch_entity_id": "Interrupteur fermeture",
           "stop_switch_entity_id": "Interrupteur stop (optionnel)",
           "impulse_mode": "Mode impulsion externe (le relay gère lui-même le retour à OFF)",
-          "button_auto_return_time": "Durée impulsion logicielle (secondes, 0 = maintenu)",
+          "switch_sustained_time": "Durée activation maintenu (secondes, 0 = toute la durée)",
           "open_script_entity_id": "Script ouverture",
           "close_script_entity_id": "Script fermeture",
           "stop_script_entity_id": "Script stop (optionnel)",
@@ -80,7 +80,7 @@
         },
         "data_description": {
           "impulse_mode": "Activé : HA envoie uniquement turn_on, le relay gère son retour à OFF.",
-          "button_auto_return_time": "0 = switch maintenu. Ignoré si mode impulsion externe activé.",
+          "switch_sustained_time": "0 = switch maintenu. Ignoré si mode impulsion externe activé.",
           "send_stop_at_end": "Stop intermédiaire (1–99%) toujours envoyé. Cette option ne concerne que 0% et 100%.",
           "command_delay": "Délai en millisecondes appliqué avant chaque commande physique.",
           "availability_template": "Ex : {{ states('sensor.gateway') == 'online' }}"

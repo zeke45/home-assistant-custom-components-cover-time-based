@@ -53,5 +53,18 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             options=new_options, version=2
         )
         _LOGGER.info("Migrated config entry %s to version 2", entry.entry_id)
+        current_version = 2
+
+    if current_version == 2:
+        # V2 → V3 : renommage button_auto_return_time → switch_sustained_time
+        new_options = dict(entry.options)
+        if "button_auto_return_time" in new_options:
+            new_options["switch_sustained_time"] = new_options.pop("button_auto_return_time")
+            _LOGGER.info(
+                "Migrated config entry %s: button_auto_return_time → switch_sustained_time",
+                entry.entry_id,
+            )
+        hass.config_entries.async_update_entry(entry, options=new_options, version=3)
+        _LOGGER.info("Migrated config entry %s to version 3", entry.entry_id)
 
     return True

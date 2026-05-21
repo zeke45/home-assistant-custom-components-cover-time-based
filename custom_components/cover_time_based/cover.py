@@ -31,7 +31,7 @@ from .const import (
     ATTR_POSITION_UNCERTAIN,
     CONF_ALIASES,
     CONF_AVAILABILITY_TEMPLATE,
-    CONF_BUTTON_AUTO_RETURN_TIME,
+    CONF_SWITCH_SUSTAINED_TIME,
     CONF_CLOSE_SCRIPT_ENTITY_ID,
     CONF_CLOSE_SWITCH_ENTITY_ID,
     CONF_COMMAND_DELAY,
@@ -49,7 +49,9 @@ from .const import (
     CONTROL_TYPE_COVER,
     CONTROL_TYPE_SCRIPT,
     CONTROL_TYPE_SWITCH,
-    DEFAULT_BUTTON_AUTO_RETURN_TIME,
+    CONTROL_TYPE_SWITCH_IMPULSE,
+    CONTROL_TYPE_SWITCH_SUSTAINED,
+    DEFAULT_SWITCH_SUSTAINED_TIME,
     DEFAULT_COMMAND_DELAY,
     DEFAULT_CONTROL_TYPE,
     DEFAULT_DEVICE_CLASS,
@@ -68,15 +70,16 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
                 cv.string: {
                     vol.Optional(CONF_NAME): cv.string,
                     vol.Optional(CONF_CONTROL_TYPE, default=DEFAULT_CONTROL_TYPE): vol.In(
-                        [CONTROL_TYPE_SWITCH, CONTROL_TYPE_SCRIPT, CONTROL_TYPE_COVER]
+                        [CONTROL_TYPE_SWITCH, CONTROL_TYPE_SWITCH_IMPULSE,
+                         CONTROL_TYPE_SWITCH_SUSTAINED, CONTROL_TYPE_SCRIPT, CONTROL_TYPE_COVER]
                     ),
                     # switch
                     vol.Optional(CONF_OPEN_SWITCH_ENTITY_ID): cv.string,
                     vol.Optional(CONF_CLOSE_SWITCH_ENTITY_ID): cv.string,
                     vol.Optional(CONF_STOP_SWITCH_ENTITY_ID): cv.string,
                     vol.Optional(
-                        CONF_BUTTON_AUTO_RETURN_TIME,
-                        default=DEFAULT_BUTTON_AUTO_RETURN_TIME,
+                        CONF_SWITCH_SUSTAINED_TIME,
+                        default=DEFAULT_SWITCH_SUSTAINED_TIME,
                     ): vol.All(vol.Coerce(int), vol.Range(min=0)),
                     vol.Optional(CONF_IMPULSE_MODE, default=DEFAULT_IMPULSE_MODE): cv.boolean,
                     # script
@@ -134,8 +137,8 @@ def devices_from_config(domain_config: dict) -> list["CoverTimeBased"]:
             open_switch_entity_id=config.pop(CONF_OPEN_SWITCH_ENTITY_ID, None),
             close_switch_entity_id=config.pop(CONF_CLOSE_SWITCH_ENTITY_ID, None),
             stop_switch_entity_id=config.pop(CONF_STOP_SWITCH_ENTITY_ID, None),
-            button_auto_return_time=config.pop(
-                CONF_BUTTON_AUTO_RETURN_TIME, DEFAULT_BUTTON_AUTO_RETURN_TIME
+            switch_sustained_time=config.pop(
+                CONF_SWITCH_SUSTAINED_TIME, DEFAULT_SWITCH_SUSTAINED_TIME
             ),
             impulse_mode=config.pop(CONF_IMPULSE_MODE, DEFAULT_IMPULSE_MODE),
             open_script_entity_id=config.pop(CONF_OPEN_SCRIPT_ENTITY_ID, None),
@@ -175,8 +178,8 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
         open_switch_entity_id=data.get(CONF_OPEN_SWITCH_ENTITY_ID, ""),
         close_switch_entity_id=data.get(CONF_CLOSE_SWITCH_ENTITY_ID, ""),
         stop_switch_entity_id=data.get(CONF_STOP_SWITCH_ENTITY_ID),
-        button_auto_return_time=data.get(
-            CONF_BUTTON_AUTO_RETURN_TIME, DEFAULT_BUTTON_AUTO_RETURN_TIME
+        switch_sustained_time=data.get(
+            CONF_SWITCH_SUSTAINED_TIME, DEFAULT_SWITCH_SUSTAINED_TIME
         ),
         impulse_mode=data.get(CONF_IMPULSE_MODE, DEFAULT_IMPULSE_MODE),
         open_script_entity_id=data.get(CONF_OPEN_SCRIPT_ENTITY_ID),
@@ -209,7 +212,7 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
         open_switch_entity_id: str | None = None,
         close_switch_entity_id: str | None = None,
         stop_switch_entity_id: str | None = None,
-        button_auto_return_time: int = DEFAULT_BUTTON_AUTO_RETURN_TIME,
+        switch_sustained_time: int = DEFAULT_SWITCH_SUSTAINED_TIME,
         impulse_mode: bool = DEFAULT_IMPULSE_MODE,
         # script mode
         open_script_entity_id: str | None = None,
@@ -228,14 +231,24 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
         """Initialize the cover."""
         self._travel_time_down: int = max(int(travel_time_down), 1)
         self._travel_time_up: int = max(int(travel_time_up), 1)
-        self._control_type: str = control_type
+
+        # Normalize the two explicit UI types → switch + impulse_mode derived
+        if control_type == CONTROL_TYPE_SWITCH_IMPULSE:
+            self._control_type = CONTROL_TYPE_SWITCH
+            self._impulse_mode = True
+        elif control_type == CONTROL_TYPE_SWITCH_SUSTAINED:
+            self._control_type = CONTROL_TYPE_SWITCH
+            self._impulse_mode = False
+        else:
+            # Legacy YAML: control_type=switch honours the impulse_mode flag as-is
+            self._control_type = control_type
+            self._impulse_mode = impulse_mode
 
         # Switch mode
         self._open_switch_entity_id: str | None = open_switch_entity_id
         self._close_switch_entity_id: str | None = close_switch_entity_id
         self._stop_switch_entity_id: str | None = stop_switch_entity_id
-        self._button_auto_return_time: int = button_auto_return_time
-        self._impulse_mode: bool = impulse_mode
+        self._switch_sustained_time: int = switch_sustained_time
 
         # Script mode
         self._open_script_entity_id: str | None = open_script_entity_id
@@ -334,7 +347,7 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
         return {
             CONF_TRAVELLING_TIME_DOWN: self._travel_time_down,
             CONF_TRAVELLING_TIME_UP: self._travel_time_up,
-            CONF_BUTTON_AUTO_RETURN_TIME: self._button_auto_return_time,
+            CONF_SWITCH_SUSTAINED_TIME: self._switch_sustained_time,
             CONF_SEND_STOP_AT_END: self._send_stop_at_end,
             CONF_IMPULSE_MODE: self._impulse_mode,
             ATTR_CONTROL_TYPE: self._control_type,
@@ -489,10 +502,10 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
             service_data={"entity_id": entity_id},
             blocking=True,
         )
-        if not self._impulse_mode and self._button_auto_return_time > 0:
+        if not self._impulse_mode and self._switch_sustained_time > 0:
 
             async def _turn_off_later() -> None:
-                await asyncio.sleep(self._button_auto_return_time)
+                await asyncio.sleep(self._switch_sustained_time)
                 await self.hass.services.async_call(
                     "homeassistant",
                     "turn_off",

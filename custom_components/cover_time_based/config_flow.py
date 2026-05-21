@@ -9,7 +9,7 @@ from homeassistant.helpers import selector
 
 from .const import (
     CONF_AVAILABILITY_TEMPLATE,
-    CONF_BUTTON_AUTO_RETURN_TIME,
+    CONF_SWITCH_SUSTAINED_TIME,
     CONF_CLOSE_SCRIPT_ENTITY_ID,
     CONF_CLOSE_SWITCH_ENTITY_ID,
     CONF_COMMAND_DELAY,
@@ -27,8 +27,10 @@ from .const import (
     CONTROL_TYPE_COVER,
     CONTROL_TYPE_SCRIPT,
     CONTROL_TYPE_SWITCH,
+    CONTROL_TYPE_SWITCH_IMPULSE,
+    CONTROL_TYPE_SWITCH_SUSTAINED,
     COVER_DEVICE_CLASSES,
-    DEFAULT_BUTTON_AUTO_RETURN_TIME,
+    DEFAULT_SWITCH_SUSTAINED_TIME,
     DEFAULT_COMMAND_DELAY,
     DEFAULT_IMPULSE_MODE,
     DEFAULT_SEND_STOP_AT_END,
@@ -57,6 +59,34 @@ def _build_common_schema(data: dict) -> dict:
     }
 
 
+def _build_switch_impulse_schema(data: dict) -> vol.Schema:
+    """Schema for switch_impulse: relay manages its own return to OFF (no impulse_mode field)."""
+    return vol.Schema({
+        vol.Required(CONF_OPEN_SWITCH_ENTITY_ID, default=data.get(CONF_OPEN_SWITCH_ENTITY_ID)):
+            selector.EntitySelector(selector.EntitySelectorConfig(domain="switch")),
+        vol.Required(CONF_CLOSE_SWITCH_ENTITY_ID, default=data.get(CONF_CLOSE_SWITCH_ENTITY_ID)):
+            selector.EntitySelector(selector.EntitySelectorConfig(domain="switch")),
+        vol.Optional(CONF_STOP_SWITCH_ENTITY_ID, default=data.get(CONF_STOP_SWITCH_ENTITY_ID, "")):
+            selector.EntitySelector(selector.EntitySelectorConfig(domain="switch")),
+        **_build_common_schema(data),
+    })
+
+
+def _build_switch_sustained_schema(data: dict) -> vol.Schema:
+    """Schema for switch_sustained: HA manages the return to OFF (with auto-return time)."""
+    return vol.Schema({
+        vol.Required(CONF_OPEN_SWITCH_ENTITY_ID, default=data.get(CONF_OPEN_SWITCH_ENTITY_ID)):
+            selector.EntitySelector(selector.EntitySelectorConfig(domain="switch")),
+        vol.Required(CONF_CLOSE_SWITCH_ENTITY_ID, default=data.get(CONF_CLOSE_SWITCH_ENTITY_ID)):
+            selector.EntitySelector(selector.EntitySelectorConfig(domain="switch")),
+        vol.Optional(CONF_STOP_SWITCH_ENTITY_ID, default=data.get(CONF_STOP_SWITCH_ENTITY_ID, "")):
+            selector.EntitySelector(selector.EntitySelectorConfig(domain="switch")),
+        vol.Optional(CONF_SWITCH_SUSTAINED_TIME, default=data.get(CONF_SWITCH_SUSTAINED_TIME, DEFAULT_SWITCH_SUSTAINED_TIME)):
+            selector.NumberSelector(selector.NumberSelectorConfig(min=0, max=60, step=1, mode=selector.NumberSelectorMode.BOX)),
+        **_build_common_schema(data),
+    })
+
+
 def _build_switch_schema(data: dict) -> vol.Schema:
     return vol.Schema({
         vol.Required(CONF_OPEN_SWITCH_ENTITY_ID, default=data.get(CONF_OPEN_SWITCH_ENTITY_ID)):
@@ -67,7 +97,7 @@ def _build_switch_schema(data: dict) -> vol.Schema:
             selector.EntitySelector(selector.EntitySelectorConfig(domain="switch")),
         vol.Optional(CONF_IMPULSE_MODE, default=data.get(CONF_IMPULSE_MODE, DEFAULT_IMPULSE_MODE)):
             selector.BooleanSelector(),
-        vol.Optional(CONF_BUTTON_AUTO_RETURN_TIME, default=data.get(CONF_BUTTON_AUTO_RETURN_TIME, DEFAULT_BUTTON_AUTO_RETURN_TIME)):
+        vol.Optional(CONF_SWITCH_SUSTAINED_TIME, default=data.get(CONF_SWITCH_SUSTAINED_TIME, DEFAULT_SWITCH_SUSTAINED_TIME)):
             selector.NumberSelector(selector.NumberSelectorConfig(min=0, max=60, step=1, mode=selector.NumberSelectorMode.BOX)),
         **_build_common_schema(data),
     })
@@ -99,9 +129,10 @@ def _build_control_type_schema(current: str) -> vol.Schema:
         vol.Required(CONF_CONTROL_TYPE, default=current):
             selector.SelectSelector(selector.SelectSelectorConfig(
                 options=[
-                    {"value": CONTROL_TYPE_SWITCH, "label": "Switch (relais ON/OFF)"},
-                    {"value": CONTROL_TYPE_SCRIPT, "label": "Script (impulsion RF / one-shot)"},
-                    {"value": CONTROL_TYPE_COVER,  "label": "Cover (délégation vers un cover existant)"},
+                    {"value": CONTROL_TYPE_SWITCH_IMPULSE,   "label": "Switch — impulsion (relay gère son retour à OFF)"},
+                    {"value": CONTROL_TYPE_SWITCH_SUSTAINED, "label": "Switch — maintenu (HA gère le retour à OFF)"},
+                    {"value": CONTROL_TYPE_SCRIPT,           "label": "Script (impulsion RF / one-shot)"},
+                    {"value": CONTROL_TYPE_COVER,            "label": "Cover (délégation vers un cover existant)"},
                 ],
                 mode=selector.SelectSelectorMode.LIST,
                 translation_key="control_type",
@@ -111,10 +142,15 @@ def _build_control_type_schema(current: str) -> vol.Schema:
 
 def _get_control_schema(control_type: str, data: dict) -> vol.Schema:
     """Return the schema matching *control_type*."""
+    if control_type == CONTROL_TYPE_SWITCH_IMPULSE:
+        return _build_switch_impulse_schema(data)
+    if control_type == CONTROL_TYPE_SWITCH_SUSTAINED:
+        return _build_switch_sustained_schema(data)
     if control_type == CONTROL_TYPE_SCRIPT:
         return _build_script_schema(data)
     if control_type == CONTROL_TYPE_COVER:
         return _build_cover_schema(data)
+    # Fallback: legacy switch (YAML entries with control_type=switch)
     return _build_switch_schema(data)
 
 
@@ -125,7 +161,7 @@ def _normalize(user_input: dict) -> dict:
         if not user_input.get(key):
             user_input[key] = None
     for key in (CONF_TRAVELLING_TIME_DOWN, CONF_TRAVELLING_TIME_UP,
-                CONF_BUTTON_AUTO_RETURN_TIME, CONF_COMMAND_DELAY):
+                CONF_SWITCH_SUSTAINED_TIME, CONF_COMMAND_DELAY):
         if key in user_input:
             user_input[key] = int(user_input[key])
     return user_input
@@ -134,11 +170,11 @@ def _normalize(user_input: dict) -> dict:
 class CoverTimeBasedConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Cover Time Based (2-step)."""
 
-    VERSION = 2
+    VERSION = 3
 
     def __init__(self):
         self._name: str = ""
-        self._control_type: str = CONTROL_TYPE_SWITCH
+        self._control_type: str = CONTROL_TYPE_SWITCH_IMPULSE
 
     async def async_step_user(self, user_input=None):
         """Step 1: name + control type."""

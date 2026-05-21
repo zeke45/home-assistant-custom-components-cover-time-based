@@ -1,7 +1,7 @@
 # Cover Time Based Component
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
-![version](https://img.shields.io/badge/version-2.4.0-blue)
+![version](https://img.shields.io/badge/version-2.5.1-blue)
 ![maintained](https://img.shields.io/badge/maintained-yes-green)
 ![license](https://img.shields.io/badge/license-MIT-green)
 
@@ -12,9 +12,9 @@ Prend en charge les relais ON/OFF (switch), les scripts RF impulsionnels et la d
 
 ## ✨ Fonctionnalités
 
-- 🎛️ **3 modes de contrôle** : switch (relais), script (RF one-shot), cover (délégation)
-- ⚡ **Mode impulsion externe** : le relay gère lui-même le retour à OFF
-- ⏱️ **Impulsion logicielle** configurable (auto-return après X secondes)
+- 🎛️ **4 modes de contrôle** : switch impulsion, switch maintenu, script (RF one-shot), cover (délégation)
+- ⚡ **Switch impulsion** : le relay gère lui-même le retour à OFF — plus besoin de `impulse_mode` en UI
+- ⏱️ **Switch maintenu** : HA gère le retour à OFF avec durée d'impulsion logicielle configurable
 - 🛑 **Switch stop dédié** optionnel
 - 📍 **Positionnement précis** (1-100%) par calcul temporel
 - ⛔ **Stop inconditionnel** en position intermédiaire (1-99%)
@@ -166,7 +166,7 @@ cover:
 
 | Option | Type | Défaut | Description |
 |---|---|---|---|
-| `control_type` | `switch`\|`script`\|`cover` | `switch` | Mode de contrôle |
+| `control_type` | `switch_impulse`\|`switch_sustained`\|`script`\|`cover` | `switch_impulse` | Mode de contrôle |
 | `open_switch_entity_id` | entity | — | Switch ouverture |
 | `close_switch_entity_id` | entity | — | Switch fermeture |
 | `stop_switch_entity_id` | entity | `null` | Switch stop dédié (optionnel) |
@@ -176,12 +176,14 @@ cover:
 | `cover_entity_id` | entity | — | Cover à déléguer (mode cover) |
 | `travelling_time_down` | int | `25` | Temps de descente (secondes) |
 | `travelling_time_up` | int | `25` | Temps de montée (secondes) |
-| `impulse_mode` | bool | `true` | Relay gère son retour à OFF |
-| `button_auto_return_time` | int | `0` | Impulsion logicielle en secondes |
+| `switch_sustained_time` | int | `0` | Durée d'activation en secondes (mode `switch_sustained`, 0 = toute la durée) |
 | `send_stop_at_end` | bool | `false` | Stop aux fins de course 0% et 100% |
 | `device_class` | string | `null` | shutter, blind, curtain, garage... |
 | `availability_template` | template | `null` | Template de disponibilité |
 | `command_delay` | int | `0` | Délai avant envoi de commande (ms, 0–10000) |
+
+> ℹ️ **YAML uniquement :** `control_type: switch` + `impulse_mode: true/false` + `button_auto_return_time` restent supportés pour la rétrocompatibilité (`button_auto_return_time` est automatiquement migré vers `switch_sustained_time` au premier démarrage).  
+> En UI, utilisez directement `switch_impulse` ou `switch_sustained` — `impulse_mode` n'apparaît plus.
 
 > ℹ️ Le stop en position intermédiaire (1-99%) est **toujours envoyé** automatiquement.
 

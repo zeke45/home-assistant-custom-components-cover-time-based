@@ -10,16 +10,18 @@ CONF_TRAVELLING_TIME_UP = "travelling_time_up"
 
 # Control type
 CONF_CONTROL_TYPE = "control_type"
-CONTROL_TYPE_SWITCH = "switch"
+CONTROL_TYPE_SWITCH = "switch"            # legacy YAML (switch + impulse_mode flag)
+CONTROL_TYPE_SWITCH_IMPULSE = "switch_impulse"    # switch, relay gère son retour à OFF
+CONTROL_TYPE_SWITCH_SUSTAINED = "switch_sustained"  # switch, HA gère le retour à OFF
 CONTROL_TYPE_SCRIPT = "script"
 CONTROL_TYPE_COVER = "cover"
-DEFAULT_CONTROL_TYPE = CONTROL_TYPE_SWITCH
+DEFAULT_CONTROL_TYPE = CONTROL_TYPE_SWITCH_IMPULSE
 
 # Switch mode
 CONF_OPEN_SWITCH_ENTITY_ID = "open_switch_entity_id"
 CONF_CLOSE_SWITCH_ENTITY_ID = "close_switch_entity_id"
 CONF_STOP_SWITCH_ENTITY_ID = "stop_switch_entity_id"
-CONF_BUTTON_AUTO_RETURN_TIME = "button_auto_return_time"
+CONF_SWITCH_SUSTAINED_TIME = "switch_sustained_time"
 CONF_IMPULSE_MODE = "impulse_mode"
 
 # Script mode
@@ -41,7 +43,7 @@ ATTR_CONTROL_TYPE = "control_type"
 
 # Default values
 DEFAULT_TRAVEL_TIME = 25
-DEFAULT_BUTTON_AUTO_RETURN_TIME = 0
+DEFAULT_SWITCH_SUSTAINED_TIME = 0
 DEFAULT_SEND_STOP_AT_END = False
 DEFAULT_IMPULSE_MODE = True
 DEFAULT_DEVICE_CLASS = None
