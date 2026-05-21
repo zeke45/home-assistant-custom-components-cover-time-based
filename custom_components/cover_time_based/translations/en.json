@@ -13,8 +13,17 @@
           "button_auto_return_time": "Software pulse duration (seconds, 0 = sustained)",
           "send_stop_at_end": "Send stop command at end of travel",
           "impulse_mode": "External impulse mode (relay manages its own return to OFF)"
+        },
+        "data_description": {
+          "button_auto_return_time": "0 = switch stays ON during the whole movement. Ignored when external impulse mode is enabled.",
+          "impulse_mode": "When enabled, HA only sends turn_on; the physical relay manages its own return to OFF.",
+          "send_stop_at_end": "Send a stop command to the switches when the cover reaches the target position. Leave disabled if the motor has a mechanical end-stop."
         }
       }
+    },
+    "error": {
+      "travel_time_too_low": "Travel time must be at least 1 second.",
+      "switch_required": "Open and close switch entities are required."
     },
     "abort": {
       "already_configured": "This cover is already configured."
@@ -33,8 +42,17 @@
           "button_auto_return_time": "Software pulse duration (seconds, 0 = sustained)",
           "send_stop_at_end": "Send stop command at end of travel",
           "impulse_mode": "External impulse mode (relay manages its own return to OFF)"
+        },
+        "data_description": {
+          "button_auto_return_time": "0 = switch stays ON during the whole movement. Ignored when external impulse mode is enabled.",
+          "impulse_mode": "When enabled, HA only sends turn_on; the physical relay manages its own return to OFF.",
+          "send_stop_at_end": "Send a stop command to the switches when the cover reaches the target position."
         }
       }
+    },
+    "error": {
+      "travel_time_too_low": "Travel time must be at least 1 second.",
+      "switch_required": "Open and close switch entities are required."
     }
   }
 }

@@ -1,12 +1,13 @@
 """Cover Time Based."""
 import logging
 import asyncio
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 import voluptuous as vol
 
 from homeassistant.core import callback
 from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.util import dt as dt_util
 from homeassistant.components.cover import (
     ATTR_CURRENT_POSITION,
     ATTR_POSITION,
@@ -38,6 +39,9 @@ CONF_STOP_SWITCH_ENTITY_ID = 'stop_switch_entity_id'
 CONF_BUTTON_AUTO_RETURN_TIME = 'button_auto_return_time'
 CONF_SEND_STOP_AT_END = 'send_stop_at_end'
 CONF_IMPULSE_MODE = 'impulse_mode'
+
+# Attribut indiquant que la position est incertaine (redémarrage HA pendant déplacement)
+ATTR_POSITION_UNCERTAIN = 'position_uncertain'
 
 DEFAULT_BUTTON_AUTO_RETURN_TIME = 0   # 0 = pas d'auto-retour
 DEFAULT_SEND_STOP_AT_END = False
@@ -85,11 +89,12 @@ class TravelCalculator:
     """Time-based travel position calculator (no external dependency)."""
 
     def __init__(self, travel_time_down: int, travel_time_up: int) -> None:
-        self._travel_time_down = travel_time_down
-        self._travel_time_up = travel_time_up
+        # Guard against division by zero
+        self._travel_time_down = max(travel_time_down, 1)
+        self._travel_time_up = max(travel_time_up, 1)
         self._position: int = 100  # 0=closed, 100=open (HA convention)
         self._target_position: int = 100
-        self._travel_started_at: datetime | None = None
+        self._travel_started_at = None
         self._travel_direction: str = TravelStatus.DIRECTION_NONE
 
     @property
@@ -103,7 +108,7 @@ class TravelCalculator:
     def current_position(self) -> int:
         if self._travel_started_at is None:
             return self._position
-        elapsed = (datetime.utcnow() - self._travel_started_at).total_seconds()
+        elapsed = (dt_util.utcnow() - self._travel_started_at).total_seconds()
         if self._travel_direction == TravelStatus.DIRECTION_UP:
             diff = 100.0 * elapsed / self._travel_time_up
             pos = min(self._position + diff, 100.0)
@@ -115,7 +120,7 @@ class TravelCalculator:
     def start_travel(self, target_position: int) -> None:
         self._position = self.current_position()
         self._target_position = target_position
-        self._travel_started_at = datetime.utcnow()
+        self._travel_started_at = dt_util.utcnow()
         if target_position > self._position:
             self._travel_direction = TravelStatus.DIRECTION_UP
         else:
@@ -133,16 +138,18 @@ class TravelCalculator:
         self._travel_started_at = None
         self._travel_direction = TravelStatus.DIRECTION_NONE
 
-    def is_traveling(self) -> bool:
-        return self._travel_started_at is not None and not self.position_reached()
-
     def position_reached(self) -> bool:
+        """Return True if target position has been reached."""
         if self._travel_started_at is None:
             return True
         current = self.current_position()
         if self._travel_direction == TravelStatus.DIRECTION_UP:
             return current >= self._target_position
         return current <= self._target_position
+
+    def is_traveling(self) -> bool:
+        """Return True if the cover is currently moving (timer active, target not yet reached)."""
+        return self._travel_started_at is not None and not self.position_reached()
 
     def is_closed(self) -> bool:
         return self.current_position() == 0
@@ -155,10 +162,10 @@ def devices_from_config(domain_config):
     devices = []
     for device_id, config in domain_config[CONF_DEVICES].items():
         name = config.pop(CONF_NAME, device_id)
-        travel_time_down = config.pop(CONF_TRAVELLING_TIME_DOWN)
-        travel_time_up = config.pop(CONF_TRAVELLING_TIME_UP)
-        open_switch_entity_id = config.pop(CONF_OPEN_SWITCH_ENTITY_ID)
-        close_switch_entity_id = config.pop(CONF_CLOSE_SWITCH_ENTITY_ID)
+        travel_time_down = config.pop(CONF_TRAVELLING_TIME_DOWN, DEFAULT_TRAVEL_TIME)
+        travel_time_up = config.pop(CONF_TRAVELLING_TIME_UP, DEFAULT_TRAVEL_TIME)
+        open_switch_entity_id = config.pop(CONF_OPEN_SWITCH_ENTITY_ID, None)
+        close_switch_entity_id = config.pop(CONF_CLOSE_SWITCH_ENTITY_ID, None)
         stop_switch_entity_id = config.pop(CONF_STOP_SWITCH_ENTITY_ID, None)
         button_auto_return_time = config.pop(CONF_BUTTON_AUTO_RETURN_TIME, DEFAULT_BUTTON_AUTO_RETURN_TIME)
         send_stop_at_end = config.pop(CONF_SEND_STOP_AT_END, DEFAULT_SEND_STOP_AT_END)
@@ -187,19 +194,24 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
 
 async def async_setup_entry(hass, config_entry, async_add_entities):
     """Set up Cover Time Based from a config entry (UI)."""
-    data = {**config_entry.data, **config_entry.options}
+    # Options take priority; fall back to data for fields not yet in options (migration)
+    data = dict(config_entry.data)
+    data.update(config_entry.options)
+
+    name = config_entry.title or data.get(CONF_NAME, config_entry.entry_id)
+
     device = CoverTimeBased(
-        device_id=config_entry.unique_id or config_entry.entry_id,
-        name=data[CONF_NAME],
+        device_id=config_entry.entry_id,
+        name=name,
         travel_time_down=data.get(CONF_TRAVELLING_TIME_DOWN, DEFAULT_TRAVEL_TIME),
         travel_time_up=data.get(CONF_TRAVELLING_TIME_UP, DEFAULT_TRAVEL_TIME),
-        open_switch_entity_id=data[CONF_OPEN_SWITCH_ENTITY_ID],
-        close_switch_entity_id=data[CONF_CLOSE_SWITCH_ENTITY_ID],
+        open_switch_entity_id=data.get(CONF_OPEN_SWITCH_ENTITY_ID, ""),
+        close_switch_entity_id=data.get(CONF_CLOSE_SWITCH_ENTITY_ID, ""),
         stop_switch_entity_id=data.get(CONF_STOP_SWITCH_ENTITY_ID),
         button_auto_return_time=data.get(CONF_BUTTON_AUTO_RETURN_TIME, DEFAULT_BUTTON_AUTO_RETURN_TIME),
         send_stop_at_end=data.get(CONF_SEND_STOP_AT_END, DEFAULT_SEND_STOP_AT_END),
         impulse_mode=data.get(CONF_IMPULSE_MODE, DEFAULT_IMPULSE_MODE),
-        unique_id=config_entry.unique_id or config_entry.entry_id,
+        unique_id=config_entry.entry_id,
     )
     async_add_entities([device])
 
@@ -214,8 +226,8 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
                  impulse_mode=DEFAULT_IMPULSE_MODE,
                  unique_id=None):
         """Initialize the cover."""
-        self._travel_time_down = travel_time_down
-        self._travel_time_up = travel_time_up
+        self._travel_time_down = max(int(travel_time_down), 1)
+        self._travel_time_up = max(int(travel_time_up), 1)
         self._open_switch_entity_id = open_switch_entity_id
         self._close_switch_entity_id = close_switch_entity_id
         self._stop_switch_entity_id = stop_switch_entity_id
@@ -225,6 +237,7 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
         self._name = name if name else device_id
         self._unique_id = unique_id or device_id
         self._unsubscribe_auto_updater = None
+        self._position_uncertain = False  # True si HA a redémarré pendant un déplacement
         self.tc = TravelCalculator(self._travel_time_down, self._travel_time_up)
 
     async def async_added_to_hass(self):
@@ -237,6 +250,17 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
             and old_state.attributes.get(ATTR_CURRENT_POSITION) is not None
         ):
             self.tc.set_position(int(old_state.attributes.get(ATTR_CURRENT_POSITION)))
+            # Si le volet était en mouvement lors du dernier arrêt, la position
+            # restaurée est incertaine (le volet a peut-être continué à bouger).
+            was_moving = old_state.state in ("opening", "closing")
+            self._position_uncertain = was_moving
+            if was_moving:
+                _LOGGER.warning(
+                    "%s: HA restarted while cover was moving. "
+                    "Restored position %d%% may be inaccurate.",
+                    self._name,
+                    self.tc.current_position(),
+                )
 
     def _handle_my_button(self):
         """Handle the MY button press."""
@@ -258,14 +282,14 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
     @property
     def extra_state_attributes(self):
         """Return the device state attributes."""
-        attr = {}
-        if self._travel_time_down is not None:
-            attr[CONF_TRAVELLING_TIME_DOWN] = self._travel_time_down
-        if self._travel_time_up is not None:
-            attr[CONF_TRAVELLING_TIME_UP] = self._travel_time_up
-        attr[CONF_BUTTON_AUTO_RETURN_TIME] = self._button_auto_return_time
-        attr[CONF_SEND_STOP_AT_END] = self._send_stop_at_end
-        attr[CONF_IMPULSE_MODE] = self._impulse_mode
+        attr = {
+            CONF_TRAVELLING_TIME_DOWN: self._travel_time_down,
+            CONF_TRAVELLING_TIME_UP: self._travel_time_up,
+            CONF_BUTTON_AUTO_RETURN_TIME: self._button_auto_return_time,
+            CONF_SEND_STOP_AT_END: self._send_stop_at_end,
+            CONF_IMPULSE_MODE: self._impulse_mode,
+            ATTR_POSITION_UNCERTAIN: self._position_uncertain,
+        }
         return attr
 
     @property
@@ -305,6 +329,7 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
     async def async_close_cover(self, **kwargs):
         """Turn the device close."""
         _LOGGER.debug('async_close_cover')
+        self._position_uncertain = False
         self.tc.start_travel_down()
         self.start_auto_updater()
         await self._async_handle_command(SERVICE_CLOSE_COVER)
@@ -312,6 +337,7 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
     async def async_open_cover(self, **kwargs):
         """Turn the device open."""
         _LOGGER.debug('async_open_cover')
+        self._position_uncertain = False
         self.tc.start_travel_up()
         self.start_auto_updater()
         await self._async_handle_command(SERVICE_OPEN_COVER)
@@ -319,6 +345,7 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
     async def async_stop_cover(self, **kwargs):
         """Turn the device stop."""
         _LOGGER.debug('async_stop_cover')
+        self._position_uncertain = False
         self._handle_my_button()
         await self._async_handle_command(SERVICE_STOP_COVER)
 
@@ -334,6 +361,7 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
         elif position > current_position:
             command = SERVICE_OPEN_COVER
         if command is not None:
+            self._position_uncertain = False
             self.start_auto_updater()
             self.tc.start_travel(position)
             _LOGGER.debug('set_position :: command %s', command)
@@ -381,12 +409,7 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
                 self.async_write_ha_state()
 
     async def _async_turn_on_with_auto_return(self, entity_id: str) -> None:
-        """Turn on a switch and schedule auto-return to OFF if configured.
-
-        In impulse_mode the relay manages the pulse itself, so we only send turn_on.
-        When button_auto_return_time > 0 (software pulse), we turn off after the delay.
-        Otherwise the switch stays ON until an explicit turn_off.
-        """
+        """Turn on a switch and schedule auto-return to OFF if configured."""
         await self.hass.services.async_call(
             "homeassistant", "turn_on",
             service_data={"entity_id": entity_id},
@@ -431,13 +454,10 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
             self._state = True
             await self._async_turn_off_switch(self._close_switch_entity_id)
             await self._async_turn_off_switch(self._open_switch_entity_id)
-            # Si un switch stop dédié est configuré, on le pulse
             if self._stop_switch_entity_id:
                 await self._async_turn_on_with_auto_return(self._stop_switch_entity_id)
         else:
             cmd = "UNKNOWN"
 
         _LOGGER.debug('_async_handle_command :: %s', cmd)
-
-        # Update state of entity
         self.async_write_ha_state()

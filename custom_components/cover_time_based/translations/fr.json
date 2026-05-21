@@ -13,8 +13,17 @@
           "button_auto_return_time": "Durée impulsion logicielle (secondes, 0 = maintenu)",
           "send_stop_at_end": "Envoyer stop en fin de course",
           "impulse_mode": "Mode impulsion externe (le relay gère lui-même le retour à OFF)"
+        },
+        "data_description": {
+          "button_auto_return_time": "0 = le switch reste allumé pendant tout le déplacement. Ignoré si le mode impulsion externe est activé.",
+          "impulse_mode": "Activé : HA envoie uniquement turn_on, le relay physique gère son retour à OFF.",
+          "send_stop_at_end": "Envoie une commande stop sur les switches à la fin du déplacement. Laisser désactivé si le moteur a un fin de course mécanique."
         }
       }
+    },
+    "error": {
+      "travel_time_too_low": "Le temps de déplacement doit être d'au moins 1 seconde.",
+      "switch_required": "L'interrupteur d'ouverture et de fermeture sont obligatoires."
     },
     "abort": {
       "already_configured": "Ce volet est déjà configuré."
@@ -33,8 +42,17 @@
           "button_auto_return_time": "Durée impulsion logicielle (secondes, 0 = maintenu)",
           "send_stop_at_end": "Envoyer stop en fin de course",
           "impulse_mode": "Mode impulsion externe (le relay gère lui-même le retour à OFF)"
+        },
+        "data_description": {
+          "button_auto_return_time": "0 = le switch reste allumé pendant tout le déplacement. Ignoré si le mode impulsion externe est activé.",
+          "impulse_mode": "Activé : HA envoie uniquement turn_on, le relay physique gère son retour à OFF.",
+          "send_stop_at_end": "Envoie une commande stop sur les switches à la fin du déplacement."
         }
       }
+    },
+    "error": {
+      "travel_time_too_low": "Le temps de déplacement doit être d'au moins 1 seconde.",
+      "switch_required": "L'interrupteur d'ouverture et de fermeture sont obligatoires."
     }
   }
 }
