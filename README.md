@@ -1,7 +1,7 @@
 # Cover Time Based Component
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
-![version](https://img.shields.io/badge/version-2.2.0-blue)
+![version](https://img.shields.io/badge/version-2.3.0-blue)
 ![maintained](https://img.shields.io/badge/maintained-yes-green)
 ![license](https://img.shields.io/badge/license-MIT-green)
 
@@ -24,6 +24,7 @@ Prend en charge les relais ON/OFF (switch), les scripts RF impulsionnels et la d
 - ⚠️ **Détection position incertaine** si HA redémarre pendant un déplacement
 - 🖥️ **Configuration UI** complète (sans YAML obligatoire)
 - 🔄 **Rechargement automatique** à chaque modification des options
+- ⏳ **Délai de commande** configurable (ms) pour échelonner les commandes simultanées
 
 ---
 
@@ -112,6 +113,44 @@ cover:
         travelling_time_up: 25
 ```
 
+### Commandes simultanées — échelonnage avec `command_delay`
+
+Lorsque plusieurs volets sont actionnés en même temps (ex: scène "Tout ouvrir"), le bus radio (Zigbee, Z-Wave, RF...) peut être saturé et ignorer certaines commandes. L'option `command_delay` permet de décaler le départ de chaque volet, **sans affecter le calcul de position** (le TravelCalculator démarre exactement quand la commande physique est envoyée).
+
+```yaml
+cover:
+  - platform: cover_time_based
+    devices:
+      volet_salon:
+        name: Volet Salon
+        command_delay: 0       # démarre immédiatement
+        travelling_time_down: 25
+        travelling_time_up: 25
+      volet_cuisine:
+        name: Volet Cuisine
+        command_delay: 300     # démarre 300 ms après
+        travelling_time_down: 25
+        travelling_time_up: 25
+      volet_chambre1:
+        name: Volet Chambre 1
+        command_delay: 600     # démarre 600 ms après
+        travelling_time_down: 25
+        travelling_time_up: 25
+      volet_chambre2:
+        name: Volet Chambre 2
+        command_delay: 900     # démarre 900 ms après
+        travelling_time_down: 25
+        travelling_time_up: 25
+      volet_bureau:
+        name: Volet Bureau
+        command_delay: 1200    # démarre 1,2 s après
+        travelling_time_down: 25
+        travelling_time_up: 25
+```
+
+> ℹ️ Le délai s'applique aux commandes **open**, **close**, **stop** et **set_position**.  
+> La valeur est en **millisecondes** (0 à 10 000). Par défaut : `0` (comportement inchangé).
+
 ---
 
 ## ⚙️ Options disponibles
@@ -133,6 +172,7 @@ cover:
 | `send_stop_at_end` | bool | `false` | Stop aux fins de course 0% et 100% |
 | `device_class` | string | `null` | shutter, blind, curtain, garage... |
 | `availability_template` | template | `null` | Template de disponibilité |
+| `command_delay` | int | `0` | Délai avant envoi de commande (ms, 0–10000) |
 
 > ℹ️ Le stop en position intermédiaire (1-99%) est **toujours envoyé** automatiquement.
 

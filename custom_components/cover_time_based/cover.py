@@ -60,6 +60,7 @@ CONF_COVER_ENTITY_ID = 'cover_entity_id'
 # Common options
 CONF_SEND_STOP_AT_END      = 'send_stop_at_end'
 CONF_AVAILABILITY_TEMPLATE = 'availability_template'
+CONF_COMMAND_DELAY         = 'command_delay'
 
 # Attributes
 ATTR_POSITION_UNCERTAIN = 'position_uncertain'
@@ -69,6 +70,7 @@ DEFAULT_BUTTON_AUTO_RETURN_TIME = 0
 DEFAULT_SEND_STOP_AT_END = False
 DEFAULT_IMPULSE_MODE = True
 DEFAULT_DEVICE_CLASS = None
+DEFAULT_COMMAND_DELAY = 0  # ms
 
 PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
     {
@@ -97,6 +99,8 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
                     vol.Optional(CONF_SEND_STOP_AT_END, default=DEFAULT_SEND_STOP_AT_END): cv.boolean,
                     vol.Optional(CONF_DEVICE_CLASS): cv.string,
                     vol.Optional(CONF_AVAILABILITY_TEMPLATE): cv.template,
+                    vol.Optional(CONF_COMMAND_DELAY, default=DEFAULT_COMMAND_DELAY):
+                        vol.All(vol.Coerce(int), vol.Range(min=0, max=10000)),
                 }
             }
         ),
@@ -191,6 +195,7 @@ def devices_from_config(domain_config):
         send_stop_at_end = config.pop(CONF_SEND_STOP_AT_END, DEFAULT_SEND_STOP_AT_END)
         device_class          = config.pop(CONF_DEVICE_CLASS, DEFAULT_DEVICE_CLASS)
         availability_template = config.pop(CONF_AVAILABILITY_TEMPLATE, None)
+        command_delay         = config.pop(CONF_COMMAND_DELAY, DEFAULT_COMMAND_DELAY)
 
         device = CoverTimeBased(
             device_id=device_id,
@@ -210,6 +215,7 @@ def devices_from_config(domain_config):
             send_stop_at_end=send_stop_at_end,
             device_class=device_class,
             availability_template=availability_template,
+            command_delay=command_delay,
             unique_id=device_id,
         )
         devices.append(device)
@@ -252,6 +258,7 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
         send_stop_at_end=data.get(CONF_SEND_STOP_AT_END, DEFAULT_SEND_STOP_AT_END),
         device_class=data.get(CONF_DEVICE_CLASS, DEFAULT_DEVICE_CLASS),
         availability_template=avail_tpl,
+        command_delay=data.get(CONF_COMMAND_DELAY, DEFAULT_COMMAND_DELAY),
         unique_id=config_entry.entry_id,
     )
     async_add_entities([device])
@@ -285,6 +292,7 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
                  send_stop_at_end=DEFAULT_SEND_STOP_AT_END,
                  device_class=DEFAULT_DEVICE_CLASS,
                  availability_template=None,
+                 command_delay=DEFAULT_COMMAND_DELAY,
                  unique_id=None):
         """Initialize the cover."""
         self._travel_time_down = max(int(travel_time_down), 1)
@@ -310,6 +318,9 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
         self._send_stop_at_end      = send_stop_at_end
         self._device_class_value    = device_class
         self._availability_template = availability_template
+        # Delay (ms) before sending the physical command.
+        # asyncio.sleep() expects seconds → divide by 1000 at call site.
+        self._command_delay = max(int(command_delay), 0)
 
         self._name      = name if name else device_id
         self._unique_id = unique_id or device_id
@@ -381,6 +392,7 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
             CONF_IMPULSE_MODE:      self._impulse_mode,
             ATTR_CONTROL_TYPE:      self._control_type,
             ATTR_POSITION_UNCERTAIN: self._position_uncertain,
+            CONF_COMMAND_DELAY:     self._command_delay,
         }
         return attr
 
@@ -415,6 +427,9 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
     async def async_close_cover(self, **kwargs):
         _LOGGER.debug('async_close_cover')
         self._position_uncertain = False
+        if self._command_delay > 0:
+            _LOGGER.debug('async_close_cover :: waiting %d ms before sending command', self._command_delay)
+            await asyncio.sleep(self._command_delay / 1000)
         self.tc.start_travel_down()
         self.start_auto_updater()
         await self._async_handle_command(SERVICE_CLOSE_COVER)
@@ -422,6 +437,9 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
     async def async_open_cover(self, **kwargs):
         _LOGGER.debug('async_open_cover')
         self._position_uncertain = False
+        if self._command_delay > 0:
+            _LOGGER.debug('async_open_cover :: waiting %d ms before sending command', self._command_delay)
+            await asyncio.sleep(self._command_delay / 1000)
         self.tc.start_travel_up()
         self.start_auto_updater()
         await self._async_handle_command(SERVICE_OPEN_COVER)
@@ -429,6 +447,9 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
     async def async_stop_cover(self, **kwargs):
         _LOGGER.debug('async_stop_cover')
         self._position_uncertain = False
+        if self._command_delay > 0:
+            _LOGGER.debug('async_stop_cover :: waiting %d ms before sending command', self._command_delay)
+            await asyncio.sleep(self._command_delay / 1000)
         self._handle_my_button()
         await self._async_handle_command(SERVICE_STOP_COVER)
 
@@ -443,6 +464,9 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
             command = SERVICE_OPEN_COVER
         if command is not None:
             self._position_uncertain = False
+            if self._command_delay > 0:
+                _LOGGER.debug('set_position :: waiting %d ms before sending command', self._command_delay)
+                await asyncio.sleep(self._command_delay / 1000)
             self.start_auto_updater()
             self.tc.start_travel(position)
             _LOGGER.debug('set_position :: command %s', command)
