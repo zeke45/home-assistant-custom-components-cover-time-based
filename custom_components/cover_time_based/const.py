@@ -12,6 +12,11 @@ CONF_TRAVELLING_TIME_UP = "travelling_time_up"
 CONF_SLAT_COMPRESSION_TIME_DOWN = "slat_compression_time_down"
 CONF_SLAT_COMPRESSION_TIME_UP   = "slat_compression_time_up"
 
+# Tilt support (venetian / orientable slats)
+CONF_TILT_TIME_OPEN  = "tilt_time_open"   # seconds to go 0%→100% tilt
+CONF_TILT_TIME_CLOSE = "tilt_time_close"  # seconds to go 100%→0% tilt
+DEFAULT_TILT_TIME    = 0                  # 0 = feature disabled
+
 # Control type
 CONF_CONTROL_TYPE = "control_type"
 CONTROL_TYPE_SWITCH = "switch"            # legacy YAML (switch + impulse_mode flag)

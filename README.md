@@ -28,6 +28,10 @@ Prend en charge les relais ON/OFF (switch), les scripts RF impulsionnels et la d
 - 🔀 **Changement de type de contrôle** possible depuis les options UI (sans recréer l'intégration)
 - 🪟 **Position ajourée** pour volets à lames fixes : service `cover_time_based.set_ajoure` + attribut `ajoure_position` calculé automatiquement
 - 🔁 **Détection des actions physiques** (mode switch) : si le relai est actionné directement (bouton mural, télécommande), HA suit automatiquement la position sans intervention
+- 🔄 **Détection bypass en mode cover** : si le cover délégué est déplacé depuis son app native, HA suit la position automatiquement
+- 🔀 **Support tilt** pour stores vénitiens/orientables : `tilt_time_open` / `tilt_time_close` + services `open_cover_tilt`, `close_cover_tilt`, `set_cover_tilt_position`
+- 🔧 **Service `set_known_position`** : force la position interne sans bouger le volet (resynchronisation après désync RF ou redémarrage HA)
+- 📦 **Migration automatique YAML → UI** : au démarrage, chaque appareil YAML est proposé en entrée de configuration UI (idempotent)
 
 ---
 
@@ -69,10 +73,6 @@ Depuis **Paramètres → Appareils et services → Cover Time Based → Configur
 
 ## 📝 Configuration YAML (legacy)
 
-### Mode Switch (relais ON/OFF)
-
-```yaml
-cover:
   - platform: cover_time_based
     devices:
       volet_salon:
@@ -189,6 +189,8 @@ cover:
 > ℹ️ **YAML uniquement :** `control_type: switch` + `impulse_mode: true/false` + `button_auto_return_time` restent supportés pour la rétrocompatibilité (`button_auto_return_time` est automatiquement migré vers `switch_sustained_time` au premier démarrage).  
 > En UI, utilisez directement `switch_impulse` ou `switch_sustained` — `impulse_mode` n'apparaît plus.
 
+| `tilt_time_open` | int | `0` | Temps d'ouverture des lames orientables 0→100% (secondes). `0` = fonctionnalité désactivée. |
+| `tilt_time_close` | int | `0` | Temps de fermeture des lames orientables 100→0% (secondes). `0` = fonctionnalité désactivée. |
 > ℹ️ Le stop en position intermédiaire (1-99%) est **toujours envoyé** automatiquement.
 
 ---

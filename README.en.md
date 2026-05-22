@@ -30,6 +30,10 @@ Supports ON/OFF relays (switch), RF impulse scripts, and delegation to an existi
 - 🔀 **Control type change** from UI options without recreating the integration
 - 🪟 **Ajouré position** for fixed-slat shutters: `cover_time_based.set_ajoure` service + automatic `ajoure_position` attribute
 - 🔁 **Physical bypass detection** (switch mode): if the relay is triggered directly (wall button, remote), HA automatically tracks position
+- 🔄 **Cover delegation bypass detection**: if the delegated cover is moved from its native app, HA tracks position automatically
+- 🔀 **Tilt support** for venetian/orientable blinds: `tilt_time_open` / `tilt_time_close` + `open_cover_tilt`, `close_cover_tilt`, `set_cover_tilt_position` services
+- 🔧 **`set_known_position` service**: forces internal position without moving the cover (re-sync after RF desync or HA restart)
+- 📦 **Automatic YAML → UI migration**: on startup, each YAML device is offered as a UI config entry (idempotent)
 
 ---
 
@@ -173,6 +177,8 @@ cover:
 | `command_delay` | int | `0` | Delay before sending command (ms, 0–10000) |
 | `slat_compression_time_down` | int | `0` | Slat compression duration at bottom of downward stroke (seconds). Enables ajouré position. |
 | `slat_compression_time_up` | int | `0` | Slat decompression duration at start of upward stroke (seconds). Usually ≥ `slat_compression_time_down`. |
+| `tilt_time_open` | int | `0` | Time to open orientable slats 0→100% (seconds). `0` = feature disabled. |
+| `tilt_time_close` | int | `0` | Time to close orientable slats 100→0% (seconds). `0` = feature disabled. |
 
 ---
 

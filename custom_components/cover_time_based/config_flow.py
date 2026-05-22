@@ -25,6 +25,9 @@ from .const import (
     CONF_STOP_SWITCH_ENTITY_ID,
     CONF_TRAVELLING_TIME_DOWN,
     CONF_TRAVELLING_TIME_UP,
+    CONF_TILT_TIME_OPEN,
+    CONF_TILT_TIME_CLOSE,
+    DEFAULT_TILT_TIME,
     CONTROL_TYPE_COVER,
     CONTROL_TYPE_SCRIPT,
     CONTROL_TYPE_SWITCH,
@@ -62,6 +65,10 @@ def _build_common_schema(data: dict) -> dict:
         vol.Optional(CONF_SLAT_COMPRESSION_TIME_DOWN, default=data.get(CONF_SLAT_COMPRESSION_TIME_DOWN, DEFAULT_SLAT_COMPRESSION_TIME_DOWN)):
             selector.NumberSelector(selector.NumberSelectorConfig(min=0, max=60, step=1, mode=selector.NumberSelectorMode.BOX)),
         vol.Optional(CONF_SLAT_COMPRESSION_TIME_UP, default=data.get(CONF_SLAT_COMPRESSION_TIME_UP, DEFAULT_SLAT_COMPRESSION_TIME_UP)):
+            selector.NumberSelector(selector.NumberSelectorConfig(min=0, max=60, step=1, mode=selector.NumberSelectorMode.BOX)),
+        vol.Optional(CONF_TILT_TIME_OPEN, default=data.get(CONF_TILT_TIME_OPEN, DEFAULT_TILT_TIME)):
+            selector.NumberSelector(selector.NumberSelectorConfig(min=0, max=60, step=1, mode=selector.NumberSelectorMode.BOX)),
+        vol.Optional(CONF_TILT_TIME_CLOSE, default=data.get(CONF_TILT_TIME_CLOSE, DEFAULT_TILT_TIME)):
             selector.NumberSelector(selector.NumberSelectorConfig(min=0, max=60, step=1, mode=selector.NumberSelectorMode.BOX)),
     }
 
@@ -195,7 +202,8 @@ def _normalize(user_input: dict) -> dict:
             user_input[key] = None
     for key in (CONF_TRAVELLING_TIME_DOWN, CONF_TRAVELLING_TIME_UP,
                 CONF_SWITCH_SUSTAINED_TIME, CONF_COMMAND_DELAY,
-                CONF_SLAT_COMPRESSION_TIME_DOWN, CONF_SLAT_COMPRESSION_TIME_UP):
+                CONF_SLAT_COMPRESSION_TIME_DOWN, CONF_SLAT_COMPRESSION_TIME_UP,
+                CONF_TILT_TIME_OPEN, CONF_TILT_TIME_CLOSE):
         if key in user_input:
             user_input[key] = int(user_input[key])
     return user_input
