@@ -10,8 +10,10 @@ import voluptuous as vol
 from homeassistant.components.cover import (
     ATTR_CURRENT_POSITION,
     ATTR_POSITION,
+    ATTR_TILT_POSITION,
     PLATFORM_SCHEMA,
     CoverEntity,
+    CoverEntityFeature,
 )
 from homeassistant.const import (
     CONF_DEVICE_CLASS,
@@ -50,6 +52,9 @@ from .const import (
     CONF_STOP_SWITCH_ENTITY_ID,
     CONF_TRAVELLING_TIME_DOWN,
     CONF_TRAVELLING_TIME_UP,
+    CONF_TILT_TIME_OPEN,
+    CONF_TILT_TIME_CLOSE,
+    DEFAULT_TILT_TIME,
     CONTROL_TYPE_COVER,
     CONTROL_TYPE_SCRIPT,
     CONTROL_TYPE_SWITCH,
@@ -118,6 +123,14 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
                         CONF_SLAT_COMPRESSION_TIME_UP,
                         default=DEFAULT_SLAT_COMPRESSION_TIME_UP,
                     ): vol.All(vol.Coerce(int), vol.Range(min=0, max=60)),
+                    vol.Optional(
+                        CONF_TILT_TIME_OPEN,
+                        default=DEFAULT_TILT_TIME,
+                    ): vol.All(vol.Coerce(int), vol.Range(min=0, max=60)),
+                    vol.Optional(
+                        CONF_TILT_TIME_CLOSE,
+                        default=DEFAULT_TILT_TIME,
+                    ): vol.All(vol.Coerce(int), vol.Range(min=0, max=60)),
                 }
             }
         ),
@@ -143,6 +156,8 @@ def devices_from_config(domain_config: dict) -> list["CoverTimeBased"]:
         command_delay = config.pop(CONF_COMMAND_DELAY, DEFAULT_COMMAND_DELAY)
         slat_compression_time_down = config.pop(CONF_SLAT_COMPRESSION_TIME_DOWN, DEFAULT_SLAT_COMPRESSION_TIME_DOWN)
         slat_compression_time_up   = config.pop(CONF_SLAT_COMPRESSION_TIME_UP,   DEFAULT_SLAT_COMPRESSION_TIME_UP)
+        tilt_time_open  = config.pop(CONF_TILT_TIME_OPEN,  DEFAULT_TILT_TIME)
+        tilt_time_close = config.pop(CONF_TILT_TIME_CLOSE, DEFAULT_TILT_TIME)
 
         device = CoverTimeBased(
             device_id=device_id,
@@ -167,6 +182,8 @@ def devices_from_config(domain_config: dict) -> list["CoverTimeBased"]:
             command_delay=command_delay,
             slat_compression_time_down=slat_compression_time_down,
             slat_compression_time_up=slat_compression_time_up,
+            tilt_time_open=tilt_time_open,
+            tilt_time_close=tilt_time_close,
             unique_id=device_id,
         )
         devices.append(device)
@@ -243,6 +260,8 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
         command_delay=data.get(CONF_COMMAND_DELAY, DEFAULT_COMMAND_DELAY),
         slat_compression_time_down=data.get(CONF_SLAT_COMPRESSION_TIME_DOWN, DEFAULT_SLAT_COMPRESSION_TIME_DOWN),
         slat_compression_time_up=data.get(CONF_SLAT_COMPRESSION_TIME_UP, DEFAULT_SLAT_COMPRESSION_TIME_UP),
+        tilt_time_open=data.get(CONF_TILT_TIME_OPEN, DEFAULT_TILT_TIME),
+        tilt_time_close=data.get(CONF_TILT_TIME_CLOSE, DEFAULT_TILT_TIME),
         unique_id=config_entry.entry_id,
     )
     async_add_entities([device])
@@ -291,6 +310,8 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
         command_delay: int = DEFAULT_COMMAND_DELAY,
         slat_compression_time_down: int = DEFAULT_SLAT_COMPRESSION_TIME_DOWN,
         slat_compression_time_up: int = DEFAULT_SLAT_COMPRESSION_TIME_UP,
+        tilt_time_open: int = DEFAULT_TILT_TIME,
+        tilt_time_close: int = DEFAULT_TILT_TIME,
         unique_id: str | None = None,
     ) -> None:
         """Initialize the cover."""
@@ -331,6 +352,16 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
         self._slat_compression_time_down: int = max(int(slat_compression_time_down), 0)
         self._slat_compression_time_up: int   = max(int(slat_compression_time_up), 0)
         self._availability_error_count: int = 0
+
+        # Tilt support (venetian / orientable slats)
+        self._tilt_time_open: int  = max(int(tilt_time_open), 0)
+        self._tilt_time_close: int = max(int(tilt_time_close), 0)
+        self._tilt_enabled: bool = self._tilt_time_open > 0 and self._tilt_time_close > 0
+        # Tilt TravelCalculator (open=100%, close=0%)
+        _tilt_down = max(self._tilt_time_close, 1)
+        _tilt_up   = max(self._tilt_time_open, 1)
+        self._tilt_calculator = TravelCalculator(_tilt_down, _tilt_up)
+        self._tilt_calculator.set_position(100)  # Default: slats open
 
         self._name: str = name if name else device_id
         self._unique_id: str = unique_id or device_id
@@ -380,6 +411,11 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
             # Restore fully-closed state so slat decompression works after restart
             if old_state.attributes.get("is_fully_closed"):
                 self._is_fully_closed = True
+            # Restore tilt position
+            if self._tilt_enabled:
+                tilt_pos = old_state.attributes.get("current_tilt_position")
+                if tilt_pos is not None:
+                    self._tilt_calculator.set_position(int(tilt_pos))
             if was_moving:
                 _LOGGER.warning(
                     "%s: HA restarted while cover was moving. "
@@ -689,6 +725,9 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
             # --- Physical bypass audit ---
             "last_physical_action": self._last_physical_action,
             "last_physical_action_at": self._last_physical_action_at,
+            # --- Tilt ---
+            CONF_TILT_TIME_OPEN: self._tilt_time_open,
+            CONF_TILT_TIME_CLOSE: self._tilt_time_close,
         }
 
     @property
@@ -744,6 +783,30 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
         if self._slat_compression_time_down <= 0:
             return None
         return 0  # TC 0 % = ajouré (slats not compressed yet)
+
+    @property
+    def supported_features(self) -> CoverEntityFeature:
+        """Return supported features, including tilt when configured."""
+        features = (
+            CoverEntityFeature.OPEN
+            | CoverEntityFeature.CLOSE
+            | CoverEntityFeature.STOP
+            | CoverEntityFeature.SET_POSITION
+        )
+        if self._tilt_enabled:
+            features |= (
+                CoverEntityFeature.OPEN_TILT
+                | CoverEntityFeature.CLOSE_TILT
+                | CoverEntityFeature.SET_TILT_POSITION
+            )
+        return features
+
+    @property
+    def current_cover_tilt_position(self) -> int | None:
+        """Return current tilt position (0=closed, 100=open). None when disabled."""
+        if not self._tilt_enabled:
+            return None
+        return self._tilt_calculator.current_position()
 
     # ---- Cover commands ----
 
@@ -850,6 +913,60 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
         self.start_auto_updater()
         self._travel_calculator.start_travel(0)
         await self._async_handle_command(SERVICE_CLOSE_COVER)
+
+    async def async_open_cover_tilt(self, **kwargs) -> None:
+        """Tilt slats to fully open position (100%)."""
+        if not self._tilt_enabled:
+            _LOGGER.warning("%s: tilt not configured (tilt_time_open/tilt_time_close = 0)", self._name)
+            return
+        _LOGGER.debug("async_open_cover_tilt")
+        await self._async_set_tilt_position(100)
+
+    async def async_close_cover_tilt(self, **kwargs) -> None:
+        """Tilt slats to fully closed position (0%)."""
+        if not self._tilt_enabled:
+            _LOGGER.warning("%s: tilt not configured (tilt_time_open/tilt_time_close = 0)", self._name)
+            return
+        _LOGGER.debug("async_close_cover_tilt")
+        await self._async_set_tilt_position(0)
+
+    async def async_set_cover_tilt_position(self, **kwargs) -> None:
+        """Set tilt position to a given percentage (0=closed, 100=open)."""
+        if not self._tilt_enabled:
+            _LOGGER.warning("%s: tilt not configured (tilt_time_open/tilt_time_close = 0)", self._name)
+            return
+        if ATTR_TILT_POSITION in kwargs:
+            await self._async_set_tilt_position(int(kwargs[ATTR_TILT_POSITION]))
+
+    async def _async_set_tilt_position(self, tilt_position: int) -> None:
+        """Internal: move slats to target tilt position using time-based tracking."""
+        current = self._tilt_calculator.current_position()
+        if tilt_position == current and not self._tilt_calculator.is_traveling():
+            return
+
+        _LOGGER.debug(
+            "_async_set_tilt_position :: current: %d, target: %d", current, tilt_position
+        )
+
+        going_up = tilt_position > current
+        # Send the appropriate brief command (same switches/scripts as position)
+        if going_up:
+            self._tilt_calculator.start_travel(tilt_position)
+            await self._async_handle_command(SERVICE_OPEN_COVER)
+        else:
+            self._tilt_calculator.start_travel(tilt_position)
+            await self._async_handle_command(SERVICE_CLOSE_COVER)
+
+        # Auto-stop: wait for tilt to reach target then stop
+        async def _tilt_auto_stop() -> None:
+            while self._tilt_calculator.is_traveling():
+                await asyncio.sleep(0.1)
+                self.async_write_ha_state()
+            self._tilt_calculator.stop()
+            await self._async_handle_command(SERVICE_STOP_COVER)
+            self.async_write_ha_state()
+
+        self.hass.async_create_task(_tilt_auto_stop())
 
     async def _async_set_position(self, position: int) -> None:
         """Move the cover to the given position (0–100)."""
