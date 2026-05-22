@@ -350,7 +350,11 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
         # without going through HA commands (bypass detection).
         if self._control_type == CONTROL_TYPE_SWITCH:
             entities_to_watch = [
-                e for e in (self._open_switch_entity_id, self._close_switch_entity_id)
+                e for e in (
+                    self._open_switch_entity_id,
+                    self._close_switch_entity_id,
+                    self._stop_switch_entity_id,
+                )
                 if e
             ]
             if entities_to_watch:
@@ -390,6 +394,7 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
         new_val = new_state.state
         is_close_switch = entity_id == self._close_switch_entity_id
         is_open_switch  = entity_id == self._open_switch_entity_id
+        is_stop_switch  = entity_id == self._stop_switch_entity_id
 
         already_going_down = (
             self._travel_calculator.is_traveling()
@@ -401,6 +406,21 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
         )
 
         if new_val == "on":
+            # ---- Stop switch pressed physically ----
+            if is_stop_switch:
+                if self._travel_calculator.is_traveling():
+                    _LOGGER.debug(
+                        "%s: physical stop detected (stop switch %s ON) — freezing position",
+                        self._name, entity_id,
+                    )
+                    self._travel_calculator.stop()
+                    self.stop_auto_updater()
+                    self._going_to_fully_closed = False
+                    self._slat_phase_cancelled = True
+                    self._slat_phase_running = False
+                    self.async_write_ha_state()
+                return
+
             if is_close_switch and not already_going_down:
                 _LOGGER.debug(
                     "%s: physical close detected (switch %s ON) — tracking travel down",
@@ -417,6 +437,19 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
                 self.start_auto_updater()
                 self.async_write_ha_state()
 
+            elif is_close_switch and already_going_down and self._impulse_mode:
+                # Impulse/toggle mode: pressing close while closing → stop
+                _LOGGER.debug(
+                    "%s: impulse toggle stop detected (close switch %s ON while closing) — freezing position",
+                    self._name, entity_id,
+                )
+                self._travel_calculator.stop()
+                self.stop_auto_updater()
+                self._going_to_fully_closed = False
+                self._slat_phase_cancelled = True
+                self._slat_phase_running = False
+                self.async_write_ha_state()
+
             elif is_open_switch and not already_going_up:
                 _LOGGER.debug(
                     "%s: physical open detected (switch %s ON) — tracking travel up",
@@ -430,6 +463,19 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
                 self._is_fully_closed = False
                 self._travel_calculator.start_travel_up()
                 self.start_auto_updater()
+                self.async_write_ha_state()
+
+            elif is_open_switch and already_going_up and self._impulse_mode:
+                # Impulse/toggle mode: pressing open while opening → stop
+                _LOGGER.debug(
+                    "%s: impulse toggle stop detected (open switch %s ON while opening) — freezing position",
+                    self._name, entity_id,
+                )
+                self._travel_calculator.stop()
+                self.stop_auto_updater()
+                self._going_to_fully_closed = False
+                self._slat_phase_cancelled = True
+                self._slat_phase_running = False
                 self.async_write_ha_state()
 
         elif new_val == "off" and not self._impulse_mode:
@@ -890,5 +936,4 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
                 service_data={"entity_id": self._cover_entity_id},
                 blocking=True,
             )
-
 
