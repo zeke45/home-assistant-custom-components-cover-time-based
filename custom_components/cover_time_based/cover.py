@@ -937,4 +937,3 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
                 service_data={"entity_id": self._cover_entity_id},
                 blocking=True,
             )
-
