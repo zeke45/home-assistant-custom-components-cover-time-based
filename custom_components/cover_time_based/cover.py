@@ -174,8 +174,41 @@ def devices_from_config(domain_config: dict) -> list["CoverTimeBased"]:
 
 
 async def async_setup_platform(hass, config, async_add_entities, discovery_info=None):
-    """Set up the cover platform (legacy YAML)."""
+    """Set up the cover platform (legacy YAML).
+
+    Also schedules automatic migration to UI config entries (idempotent).
+    Each device is imported via SOURCE_IMPORT — if an entry with the same
+    unique_id already exists the flow aborts silently.
+    """
+    # Save raw device configs BEFORE devices_from_config pops() them
+    raw_devices = {
+        device_id: dict(device_config)
+        for device_id, device_config in config.get(CONF_DEVICES, {}).items()
+    }
     async_add_entities(devices_from_config(config))
+
+    # Schedule migration to UI config entries
+    from homeassistant.config_entries import SOURCE_IMPORT  # noqa: PLC0415
+    from .const import DOMAIN  # noqa: PLC0415
+    for device_id, device_config in raw_devices.items():
+        name = device_config.pop(CONF_NAME, device_id)
+        import_data = {
+            "device_id": device_id,
+            CONF_NAME: name,
+            **device_config,
+        }
+        hass.async_create_task(
+            hass.config_entries.flow.async_init(
+                DOMAIN,
+                context={"source": SOURCE_IMPORT},
+                data=import_data,
+            )
+        )
+    _LOGGER.info(
+        "cover_time_based: %d YAML device(s) scheduled for UI migration. "
+        "Remove the YAML block once migration is confirmed in Settings → Integrations.",
+        len(raw_devices),
+    )
 
 
 async def async_setup_entry(hass, config_entry, async_add_entities):
@@ -375,22 +408,6 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
                     self._name, entities_to_watch,
                 )
 
-    @callback
-    def _async_switch_state_changed(self, event) -> None:
-        """React to a physical switch ON/OFF triggered directly on the relay.
-
-        Called when the open or close switch changes state WITHOUT having been
-        triggered by an HA command (e.g. user presses the wall button or the
-        physical relay button directly).
-
-        Strategy:
-        - Switch → ON  : start travel in the matching direction, unless HA is
-                         already tracking that exact direction (would be a
-                         double-trigger from our own command).
-        - Switch → OFF : in sustained (non-impulse) mode only, the motor has
-                         physically stopped; freeze the tracked position.
-                         Ignored in impulse mode (the brief ON→OFF is normal).
-        """
         entity_id = event.data.get("entity_id")
         new_state = event.data.get("new_state")
         if new_state is None:
@@ -495,87 +512,6 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
     @property
     def name(self) -> str:
         return self._name
-
-    @property
-    def device_class(self) -> str | None:
-        return self._device_class_value
-
-    @property
-    def available(self) -> bool:
-        """Return availability based on optional template."""
-        if self._availability_template is None:
-            return True
-        try:
-            self._availability_template.hass = self.hass
-            result = self._availability_template.async_render(parse_result=False)
-            available = str(result).lower() in ("true", "1", "yes", "on")
-            self._availability_error_count = 0
-            return available
-        except Exception as err:  # noqa: BLE001
-            self._availability_error_count += 1
-            if self._availability_error_count <= 3:
-                _LOGGER.warning(
-                    "%s: availability_template error (#%d): %s",
-                    self._name,
-                    self._availability_error_count,
-                    err,
-                )
-            else:
-                _LOGGER.debug(
-                    "%s: availability_template recurring error: %s", self._name, err
-                )
-            return False
-
-    @property
-    def extra_state_attributes(self) -> dict:
-        pure_time_down = max(self._travel_time_down - self._slat_compression_time_down, 1)
-        pure_time_up   = max(self._travel_time_up   - self._slat_compression_time_up,   1)
-        return {
-            CONF_TRAVELLING_TIME_DOWN: self._travel_time_down,
-            CONF_TRAVELLING_TIME_UP: self._travel_time_up,
-            CONF_SWITCH_SUSTAINED_TIME: self._switch_sustained_time,
-            CONF_SEND_STOP_AT_END: self._send_stop_at_end,
-            CONF_IMPULSE_MODE: self._impulse_mode,
-            ATTR_CONTROL_TYPE: self._control_type,
-            ATTR_POSITION_UNCERTAIN: self._position_uncertain,
-            CONF_COMMAND_DELAY: self._command_delay,
-            CONF_SLAT_COMPRESSION_TIME_DOWN: self._slat_compression_time_down,
-            CONF_SLAT_COMPRESSION_TIME_UP: self._slat_compression_time_up,
-            ATTR_AJOURE_POSITION: self.ajoure_position,
-            "is_fully_closed": self._is_fully_closed,
-            # --- Diagnostic / calibration attributes ---
-            "pure_travel_time_down": pure_time_down,
-            "pure_travel_time_up": pure_time_up,
-            "slat_phase_running": self._slat_phase_running,
-            "going_to_fully_closed": self._going_to_fully_closed,
-            "tc_position": self._travel_calculator.current_position(),
-            "tc_is_traveling": self._travel_calculator.is_traveling(),
-            "tc_direction": self._travel_calculator.travel_direction,
-            # --- Physical bypass audit ---
-            "last_physical_action": self._last_physical_action,
-            "last_physical_action_at": self._last_physical_action_at,
-        }
-
-    @property
-    def current_cover_position(self) -> int:
-        if self._is_fully_closed or self._slat_phase_running:
-            return 0
-        return self._travel_calculator.current_position()
-
-    @property
-    def is_opening(self) -> bool:
-        # During slat decompression phase (opening from fully-closed)
-        if self._slat_phase_running and not self._going_to_fully_closed:
-            return True
-        return (
-            self._travel_calculator.is_traveling()
-            and self._travel_calculator.travel_direction == TravelStatus.DIRECTION_UP
-        )
-
-    @property
-    def is_closing(self) -> bool:
-        # During slat compression phase (going to fully-closed)
-        if self._slat_phase_running and self._going_to_fully_closed:
             return True
         return (
             self._travel_calculator.is_traveling()

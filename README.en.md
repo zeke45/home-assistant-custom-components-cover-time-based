@@ -71,6 +71,10 @@ From **Settings → Devices & Services → Cover Time Based → Configure**:
 
 ## 📝 YAML Configuration (legacy)
 
+> 💡 **Automatic migration to UI**: on HA startup, each YAML-configured device is automatically migrated to a UI config entry (via `SOURCE_IMPORT`). The migration is **idempotent** — it aborts silently if the entry already exists. Once migration is confirmed in **Settings → Devices & Services**, you can remove the YAML block from `configuration.yaml`.
+
+
+
 ### Switch mode (ON/OFF relay)
 
 ```yaml
