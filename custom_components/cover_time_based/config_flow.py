@@ -165,6 +165,28 @@ def _get_control_schema(control_type: str, data: dict) -> vol.Schema:
     return _build_switch_schema(data)
 
 
+def _validate_timing(user_input: dict) -> dict:
+    """Validate timing coherence: slat times must be < travel times.
+
+    Returns a dict of field → error key (empty dict = no errors).
+    """
+    errors: dict[str, str] = {}
+    time_down = int(user_input.get(CONF_TRAVELLING_TIME_DOWN, DEFAULT_TRAVEL_TIME))
+    time_up   = int(user_input.get(CONF_TRAVELLING_TIME_UP,   DEFAULT_TRAVEL_TIME))
+    slat_down = int(user_input.get(CONF_SLAT_COMPRESSION_TIME_DOWN, 0))
+    slat_up   = int(user_input.get(CONF_SLAT_COMPRESSION_TIME_UP,   0))
+
+    if time_down < 1:
+        errors[CONF_TRAVELLING_TIME_DOWN] = "travel_time_too_low"
+    if time_up < 1:
+        errors[CONF_TRAVELLING_TIME_UP] = "travel_time_too_low"
+    if slat_down > 0 and slat_down >= time_down:
+        errors[CONF_SLAT_COMPRESSION_TIME_DOWN] = "slat_time_too_high"
+    if slat_up > 0 and slat_up >= time_up:
+        errors[CONF_SLAT_COMPRESSION_TIME_UP] = "slat_time_too_high"
+    return errors
+
+
 def _normalize(user_input: dict) -> dict:
     """Normalize user_input: empty strings → None, float → int for time fields."""
     for key in (CONF_STOP_SWITCH_ENTITY_ID, CONF_STOP_SCRIPT_ENTITY_ID,
@@ -208,15 +230,17 @@ class CoverTimeBasedConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             user_input = _normalize(user_input)
-            user_input[CONF_CONTROL_TYPE] = self._control_type
+            errors = _validate_timing(user_input)
+            if not errors:
+                user_input[CONF_CONTROL_TYPE] = self._control_type
 
-            unique_id = str(uuid.uuid4())
-            await self.async_set_unique_id(unique_id)
-            return self.async_create_entry(
-                title=self._name,
-                data={CONF_NAME: self._name},
-                options=user_input,
-            )
+                unique_id = str(uuid.uuid4())
+                await self.async_set_unique_id(unique_id)
+                return self.async_create_entry(
+                    title=self._name,
+                    data={CONF_NAME: self._name},
+                    options=user_input,
+                )
 
         schema = _get_control_schema(self._control_type, {})
         return self.async_show_form(step_id="control", data_schema=schema, errors=errors)
@@ -255,8 +279,10 @@ class CoverTimeBasedOptionsFlow(config_entries.OptionsFlow):
 
         if user_input is not None:
             user_input = _normalize(user_input)
-            user_input[CONF_CONTROL_TYPE] = control_type
-            return self.async_create_entry(title="", data=user_input)
+            errors = _validate_timing(user_input)
+            if not errors:
+                user_input[CONF_CONTROL_TYPE] = control_type
+                return self.async_create_entry(title="", data=user_input)
 
         schema = _get_control_schema(control_type, data)
         return self.async_show_form(step_id="options", data_schema=schema, errors=errors)

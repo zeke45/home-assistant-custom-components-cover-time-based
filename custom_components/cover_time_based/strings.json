@@ -46,7 +46,8 @@
     },
     "error": {
       "travel_time_too_low": "Le temps de déplacement doit être d'au moins 1 seconde.",
-      "switch_required": "L'interrupteur d'ouverture et de fermeture sont obligatoires."
+      "switch_required": "L'interrupteur d'ouverture et de fermeture sont obligatoires.",
+      "slat_time_too_high": "Le temps de compression/décompression des lames doit être strictement inférieur au temps de déplacement total."
     },
     "abort": {
       "already_configured": "Ce volet est déjà configuré."
@@ -98,7 +99,8 @@
     },
     "error": {
       "travel_time_too_low": "Le temps de déplacement doit être d'au moins 1 seconde.",
-      "switch_required": "L'interrupteur d'ouverture et de fermeture sont obligatoires."
+      "switch_required": "L'interrupteur d'ouverture et de fermeture sont obligatoires.",
+      "slat_time_too_high": "Le temps de compression/décompression des lames doit être strictement inférieur au temps de déplacement total."
     }
   }
 }
