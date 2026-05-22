@@ -191,7 +191,7 @@ In **switch** mode (impulse or sustained), the component monitors the state of o
 | Stop relay → ON | Position frozen immediately | Position frozen immediately |
 | Relay → OFF | Ignored (brief pulse) | Position frozen (motor stopped) |
 
-> ℹ️ **Script and cover modes**: automatic detection is not possible as these modes have no observable "motor running" state in HA. You can manually resync the position via `cover.set_cover_position`.
+> ℹ️ **Cover delegation mode**: the component now monitors state changes of the delegated cover entity. If it starts opening or closing externally (wall button, native app), position is tracked automatically. **Script mode**: automatic detection is not possible as scripts have no observable "motor running" state in HA.
 
 ---
 

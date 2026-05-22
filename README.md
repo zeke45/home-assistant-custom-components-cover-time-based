@@ -207,7 +207,7 @@ En mode **switch** (impulsion ou maintenu), le composant surveille l'état des r
 | Relai ouverture → ON | Suivi montée démarré ↑ | Suivi montée démarré ↑ |
 | Relai → OFF | Ignoré (impulsion brève) | Position figée (moteur arrêté) |
 
-> ℹ️ **Modes script et cover** : la détection automatique n'est pas possible car ces modes ne disposent pas d'état "moteur en marche" observable dans HA. Vous pouvez resynchroniser la position manuellement via `cover.set_cover_position` (sans déplacer physiquement le volet, si `send_stop_at_end: false`).
+> ℹ️ **Modes script et cover** : En mode **cover** (délégation), le composant surveille désormais les changements d'état du cover délégué. Si celui-ci démarre une ouverture ou fermeture en dehors de HA, la position est suivie automatiquement. En mode **script**, la détection automatique n'est pas possible car ces modes ne disposent pas d'état "moteur en marche" observable dans HA.
 
 ---
 
