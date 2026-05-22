@@ -380,6 +380,22 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
                     self._name, entities_to_watch,
                 )
 
+        # ---- Subscribe to delegated cover state changes ----
+        # In cover delegation mode, if the underlying cover is moved externally
+        # (e.g. via its own remote or app), sync our position tracking.
+        if self._control_type == CONTROL_TYPE_COVER and self._cover_entity_id:
+            self.async_on_remove(
+                async_track_state_change_event(
+                    self.hass,
+                    [self._cover_entity_id],
+                    self._async_delegated_cover_state_changed,
+                )
+            )
+            _LOGGER.debug(
+                "%s: subscribed to delegated cover state changes: %s",
+                self._name, self._cover_entity_id,
+            )
+
     @callback
     def _async_switch_state_changed(self, event) -> None:
         """React to a physical switch ON/OFF triggered directly on the relay.
@@ -475,6 +491,87 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
                 _LOGGER.debug(
                     "%s: physical stop detected (switch %s OFF) — freezing position",
                     self._name, entity_id,
+                )
+                self._last_physical_action = "stop"
+                self._last_physical_action_at = dt_util.utcnow().isoformat()
+                self._travel_calculator.stop()
+                self.stop_auto_updater()
+                self._going_to_fully_closed = False
+                self._slat_phase_cancelled = True
+                self._slat_phase_running = False
+                self.async_write_ha_state()
+
+    @callback
+    def _async_delegated_cover_state_changed(self, event) -> None:
+        """React to state changes of the delegated cover entity.
+
+        Tracks external movements (wall button, remote, native app) when
+        the underlying cover entity changes state without going through HA.
+
+        Double-trigger prevention: if we are already tracking the same direction
+        (our own command caused the state change), we skip.
+        """
+        new_state = event.data.get("new_state")
+        old_state = event.data.get("old_state")
+        if new_state is None:
+            return
+
+        new_val = new_state.state
+        old_val = old_state.state if old_state else None
+
+        already_going_up = (
+            self._travel_calculator.is_traveling()
+            and self._travel_calculator.travel_direction == TravelStatus.DIRECTION_UP
+        )
+        already_going_down = (
+            self._travel_calculator.is_traveling()
+            and self._travel_calculator.travel_direction == TravelStatus.DIRECTION_DOWN
+        )
+
+        if new_val == "opening" and old_val != "opening":
+            if already_going_up:
+                return  # Our own command — skip
+            _LOGGER.debug(
+                "%s: delegated cover %s started opening externally — tracking up",
+                self._name, self._cover_entity_id,
+            )
+            self._last_physical_action = "open"
+            self._last_physical_action_at = dt_util.utcnow().isoformat()
+            if self._travel_calculator.is_traveling():
+                self._travel_calculator.stop()
+                self.stop_auto_updater()
+            self._position_uncertain = False
+            self._going_to_fully_closed = False
+            self._is_fully_closed = False
+            self._travel_calculator.start_travel_up()
+            self.start_auto_updater()
+            self.async_write_ha_state()
+
+        elif new_val == "closing" and old_val != "closing":
+            if already_going_down:
+                return  # Our own command — skip
+            _LOGGER.debug(
+                "%s: delegated cover %s started closing externally — tracking down",
+                self._name, self._cover_entity_id,
+            )
+            self._last_physical_action = "close"
+            self._last_physical_action_at = dt_util.utcnow().isoformat()
+            if self._travel_calculator.is_traveling():
+                self._travel_calculator.stop()
+                self.stop_auto_updater()
+            self._position_uncertain = False
+            self._going_to_fully_closed = self._slat_compression_time_down > 0
+            self._is_fully_closed = False
+            self._travel_calculator.start_travel_down()
+            self.start_auto_updater()
+            self.async_write_ha_state()
+
+        elif new_val not in ("opening", "closing") and old_val in ("opening", "closing"):
+            # External stop: cover was moving but is no longer (idle, closed, open, unavailable…)
+            if self._travel_calculator.is_traveling():
+                _LOGGER.debug(
+                    "%s: delegated cover %s stopped externally — freezing position",
+                    self._name, self._cover_entity_id,
                 )
                 self._last_physical_action = "stop"
                 self._last_physical_action_at = dt_util.utcnow().isoformat()
