@@ -23,7 +23,7 @@ from homeassistant.const import (
 from homeassistant.core import callback
 from homeassistant.helpers import template as template_helper
 import homeassistant.helpers.config_validation as cv
-from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.helpers.event import async_track_state_change_event, async_track_time_interval
 from homeassistant.helpers.restore_state import RestoreEntity
 
 from .const import (
@@ -344,6 +344,107 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
                     self._name,
                     self._travel_calculator.current_position(),
                 )
+
+        # ---- Subscribe to physical switch state changes ----
+        # Allows HA to track movements triggered directly on the relay/button,
+        # without going through HA commands (bypass detection).
+        if self._control_type == CONTROL_TYPE_SWITCH:
+            entities_to_watch = [
+                e for e in (self._open_switch_entity_id, self._close_switch_entity_id)
+                if e
+            ]
+            if entities_to_watch:
+                self.async_on_remove(
+                    async_track_state_change_event(
+                        self.hass,
+                        entities_to_watch,
+                        self._async_switch_state_changed,
+                    )
+                )
+                _LOGGER.debug(
+                    "%s: subscribed to physical switch changes: %s",
+                    self._name, entities_to_watch,
+                )
+
+    @callback
+    def _async_switch_state_changed(self, event) -> None:
+        """React to a physical switch ON/OFF triggered directly on the relay.
+
+        Called when the open or close switch changes state WITHOUT having been
+        triggered by an HA command (e.g. user presses the wall button or the
+        physical relay button directly).
+
+        Strategy:
+        - Switch → ON  : start travel in the matching direction, unless HA is
+                         already tracking that exact direction (would be a
+                         double-trigger from our own command).
+        - Switch → OFF : in sustained (non-impulse) mode only, the motor has
+                         physically stopped; freeze the tracked position.
+                         Ignored in impulse mode (the brief ON→OFF is normal).
+        """
+        entity_id = event.data.get("entity_id")
+        new_state = event.data.get("new_state")
+        if new_state is None:
+            return
+
+        new_val = new_state.state
+        is_close_switch = entity_id == self._close_switch_entity_id
+        is_open_switch  = entity_id == self._open_switch_entity_id
+
+        already_going_down = (
+            self._travel_calculator.is_traveling()
+            and self._travel_calculator.travel_direction == TravelStatus.DIRECTION_DOWN
+        )
+        already_going_up = (
+            self._travel_calculator.is_traveling()
+            and self._travel_calculator.travel_direction == TravelStatus.DIRECTION_UP
+        )
+
+        if new_val == "on":
+            if is_close_switch and not already_going_down:
+                _LOGGER.debug(
+                    "%s: physical close detected (switch %s ON) — tracking travel down",
+                    self._name, entity_id,
+                )
+                # Stop any opposite movement currently tracked
+                if self._travel_calculator.is_traveling():
+                    self._travel_calculator.stop()
+                    self.stop_auto_updater()
+                self._position_uncertain = False
+                self._going_to_fully_closed = self._slat_compression_time_down > 0
+                self._is_fully_closed = False
+                self._travel_calculator.start_travel_down()
+                self.start_auto_updater()
+                self.async_write_ha_state()
+
+            elif is_open_switch and not already_going_up:
+                _LOGGER.debug(
+                    "%s: physical open detected (switch %s ON) — tracking travel up",
+                    self._name, entity_id,
+                )
+                if self._travel_calculator.is_traveling():
+                    self._travel_calculator.stop()
+                    self.stop_auto_updater()
+                self._position_uncertain = False
+                self._going_to_fully_closed = False
+                self._is_fully_closed = False
+                self._travel_calculator.start_travel_up()
+                self.start_auto_updater()
+                self.async_write_ha_state()
+
+        elif new_val == "off" and not self._impulse_mode:
+            # Sustained mode only: switch OFF = motor physically stopped
+            if self._travel_calculator.is_traveling() and (is_close_switch or is_open_switch):
+                _LOGGER.debug(
+                    "%s: physical stop detected (switch %s OFF) — freezing position",
+                    self._name, entity_id,
+                )
+                self._travel_calculator.stop()
+                self.stop_auto_updater()
+                self._going_to_fully_closed = False
+                self._slat_phase_cancelled = True
+                self._slat_phase_running = False
+                self.async_write_ha_state()
 
     def _handle_my_button(self) -> None:
         if self._travel_calculator.is_traveling():
@@ -789,3 +890,5 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
                 service_data={"entity_id": self._cover_entity_id},
                 blocking=True,
             )
+
+

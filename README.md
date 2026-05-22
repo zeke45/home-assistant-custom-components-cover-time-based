@@ -1,7 +1,7 @@
 # Cover Time Based Component
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
-![version](https://img.shields.io/badge/version-2.6.2-blue)
+![version](https://img.shields.io/badge/version-2.6.3-blue)
 ![maintained](https://img.shields.io/badge/maintained-yes-green)
 ![license](https://img.shields.io/badge/license-MIT-green)
 
@@ -27,6 +27,7 @@ Prend en charge les relais ON/OFF (switch), les scripts RF impulsionnels et la d
 - ⏳ **Délai de commande** configurable (ms) pour échelonner les commandes simultanées
 - 🔀 **Changement de type de contrôle** possible depuis les options UI (sans recréer l'intégration)
 - 🪟 **Position ajourée** pour volets à lames fixes : service `cover_time_based.set_ajoure` + attribut `ajoure_position` calculé automatiquement
+- 🔁 **Détection des actions physiques** (mode switch) : si le relai est actionné directement (bouton mural, télécommande), HA suit automatiquement la position sans intervention
 
 ---
 
@@ -189,6 +190,20 @@ cover:
 > En UI, utilisez directement `switch_impulse` ou `switch_sustained` — `impulse_mode` n'apparaît plus.
 
 > ℹ️ Le stop en position intermédiaire (1-99%) est **toujours envoyé** automatiquement.
+
+---
+
+## 🔁 Détection des actions physiques (bypass switch)
+
+En mode **switch** (impulsion ou maintenu), le composant surveille l'état des relais d'ouverture et de fermeture. Si vous actionnez directement le relai sans passer par HA (bouton mural, télécommande RF, test physique), HA détecte le changement et **suit la position automatiquement**.
+
+| Événement physique | Mode impulsion | Mode maintenu |
+|---|---|---|
+| Relai fermeture → ON | Suivi descente démarré ↓ | Suivi descente démarré ↓ |
+| Relai ouverture → ON | Suivi montée démarré ↑ | Suivi montée démarré ↑ |
+| Relai → OFF | Ignoré (impulsion brève) | Position figée (moteur arrêté) |
+
+> ℹ️ **Modes script et cover** : la détection automatique n'est pas possible car ces modes ne disposent pas d'état "moteur en marche" observable dans HA. Vous pouvez resynchroniser la position manuellement via `cover.set_cover_position` (sans déplacer physiquement le volet, si `send_stop_at_end: false`).
 
 ---
 
