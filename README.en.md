@@ -1,7 +1,7 @@
 # Cover Time Based Component
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
-![version](https://img.shields.io/badge/version-2.6.4-blue)
+![version](https://img.shields.io/badge/version-2.7.0-blue)
 ![maintained](https://img.shields.io/badge/maintained-yes-green)
 ![license](https://img.shields.io/badge/license-MIT-green)
 
@@ -281,6 +281,58 @@ tap_action:
 | `cover.py` | `CoverTimeBased` entity — HA logic |
 | `config_flow.py` | UI configuration and options flow |
 | `__init__.py` | Setup, unload, version migration |
+| `tests/` | Pytest unit tests (`TravelCalculator` + config flow validation) |
+
+---
+
+## 📊 State attributes
+
+In addition to standard HA attributes (`current_position`, `is_opening`, etc.), the entity exposes:
+
+### Main attributes
+
+| Attribute | Type | Description |
+|---|---|---|
+| `current_position` | int | Current position (0–100%) |
+| `is_fully_closed` | bool | `true` when the cover is fully closed (slats compressed) |
+| `ajoure_position` | int | HA position value corresponding to the ajouré state (auto-calculated) |
+
+### Diagnostic / calibration attributes
+
+| Attribute | Type | Description |
+|---|---|---|
+| `pure_travel_time_down` | int | Effective downward travel time (excluding slat phase), in seconds |
+| `pure_travel_time_up` | int | Effective upward travel time (excluding slat phase), in seconds |
+| `slat_phase_running` | bool | `true` if the slat compression/decompression phase is running |
+| `going_to_fully_closed` | bool | `true` if a full close command (including slats) is in progress |
+| `tc_position` | int | Internal `TravelCalculator` position (0–100, before ajouré correction) |
+| `tc_is_traveling` | bool | `true` if the `TravelCalculator` considers the cover as moving |
+| `tc_direction` | str | Internal direction: `"up"`, `"down"` or `None` |
+
+### Physical action audit attributes
+
+| Attribute | Type | Description |
+|---|---|---|
+| `last_physical_action` | str | Last detected physical action: `"open"`, `"close"` or `"stop"` |
+| `last_physical_action_at` | str | ISO timestamp of the last physical action (e.g. `2024-01-15T14:32:05.123456+00:00`) |
+
+> ℹ️ `last_physical_action` / `last_physical_action_at` are only populated in **switch** mode (impulse or sustained), when the relay is triggered directly without going through HA.
+
+---
+
+## ✅ Unit tests
+
+The project includes a pytest test suite runnable without a Home Assistant installation:
+
+```bash
+pip install -r requirements-test.txt
+pytest
+```
+
+| Test file | Coverage |
+|---|---|
+| `tests/test_travel_calculator.py` | ~30 tests — position logic, direction, end-of-stroke |
+| `tests/test_config_flow_validation.py` | ~13 tests — timing validation (`_validate_timing`) |
 
 ---
 
