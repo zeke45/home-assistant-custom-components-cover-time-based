@@ -20,6 +20,8 @@ from .const import (
     CONF_OPEN_SCRIPT_ENTITY_ID,
     CONF_OPEN_SWITCH_ENTITY_ID,
     CONF_SEND_STOP_AT_END,
+    CONF_SLAT_COMPRESSION_TIME_DOWN,
+    CONF_SLAT_COMPRESSION_TIME_UP,
     CONF_STOP_SCRIPT_ENTITY_ID,
     CONF_STOP_SWITCH_ENTITY_ID,
     CONF_TRAVELLING_TIME_DOWN,
@@ -34,6 +36,8 @@ from .const import (
     DEFAULT_COMMAND_DELAY,
     DEFAULT_IMPULSE_MODE,
     DEFAULT_SEND_STOP_AT_END,
+    DEFAULT_SLAT_COMPRESSION_TIME_DOWN,
+    DEFAULT_SLAT_COMPRESSION_TIME_UP,
     DEFAULT_TRAVEL_TIME,
     DOMAIN,
 )
@@ -56,6 +60,10 @@ def _build_common_schema(data: dict) -> dict:
             )),
         vol.Optional(CONF_AVAILABILITY_TEMPLATE, default=data.get(CONF_AVAILABILITY_TEMPLATE, "")):
             selector.TemplateSelector(),
+        vol.Optional(CONF_SLAT_COMPRESSION_TIME_DOWN, default=data.get(CONF_SLAT_COMPRESSION_TIME_DOWN, DEFAULT_SLAT_COMPRESSION_TIME_DOWN)):
+            selector.NumberSelector(selector.NumberSelectorConfig(min=0, max=60, step=1, mode=selector.NumberSelectorMode.BOX)),
+        vol.Optional(CONF_SLAT_COMPRESSION_TIME_UP, default=data.get(CONF_SLAT_COMPRESSION_TIME_UP, DEFAULT_SLAT_COMPRESSION_TIME_UP)):
+            selector.NumberSelector(selector.NumberSelectorConfig(min=0, max=60, step=1, mode=selector.NumberSelectorMode.BOX)),
     }
 
 
@@ -161,7 +169,8 @@ def _normalize(user_input: dict) -> dict:
         if not user_input.get(key):
             user_input[key] = None
     for key in (CONF_TRAVELLING_TIME_DOWN, CONF_TRAVELLING_TIME_UP,
-                CONF_SWITCH_SUSTAINED_TIME, CONF_COMMAND_DELAY):
+                CONF_SWITCH_SUSTAINED_TIME, CONF_COMMAND_DELAY,
+                CONF_SLAT_COMPRESSION_TIME_DOWN, CONF_SLAT_COMPRESSION_TIME_UP):
         if key in user_input:
             user_input[key] = int(user_input[key])
     return user_input

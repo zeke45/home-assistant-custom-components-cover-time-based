@@ -27,6 +27,7 @@ from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.restore_state import RestoreEntity
 
 from .const import (
+    ATTR_AJOURE_POSITION,
     ATTR_CONTROL_TYPE,
     ATTR_POSITION_UNCERTAIN,
     CONF_ALIASES,
@@ -42,6 +43,8 @@ from .const import (
     CONF_OPEN_SCRIPT_ENTITY_ID,
     CONF_OPEN_SWITCH_ENTITY_ID,
     CONF_SEND_STOP_AT_END,
+    CONF_SLAT_COMPRESSION_TIME_DOWN,
+    CONF_SLAT_COMPRESSION_TIME_UP,
     CONF_STOP_SCRIPT_ENTITY_ID,
     CONF_STOP_SWITCH_ENTITY_ID,
     CONF_TRAVELLING_TIME_DOWN,
@@ -57,6 +60,8 @@ from .const import (
     DEFAULT_DEVICE_CLASS,
     DEFAULT_IMPULSE_MODE,
     DEFAULT_SEND_STOP_AT_END,
+    DEFAULT_SLAT_COMPRESSION_TIME_DOWN,
+    DEFAULT_SLAT_COMPRESSION_TIME_UP,
     DEFAULT_TRAVEL_TIME,
 )
 from .travel_calculator import TravelCalculator, TravelStatus
@@ -104,6 +109,14 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
                     vol.Optional(
                         CONF_COMMAND_DELAY, default=DEFAULT_COMMAND_DELAY
                     ): vol.All(vol.Coerce(int), vol.Range(min=0, max=10000)),
+                    vol.Optional(
+                        CONF_SLAT_COMPRESSION_TIME_DOWN,
+                        default=DEFAULT_SLAT_COMPRESSION_TIME_DOWN,
+                    ): vol.All(vol.Coerce(int), vol.Range(min=0, max=60)),
+                    vol.Optional(
+                        CONF_SLAT_COMPRESSION_TIME_UP,
+                        default=DEFAULT_SLAT_COMPRESSION_TIME_UP,
+                    ): vol.All(vol.Coerce(int), vol.Range(min=0, max=60)),
                 }
             }
         ),
@@ -127,6 +140,8 @@ def devices_from_config(domain_config: dict) -> list["CoverTimeBased"]:
         device_class = config.pop(CONF_DEVICE_CLASS, DEFAULT_DEVICE_CLASS)
         availability_template = config.pop(CONF_AVAILABILITY_TEMPLATE, None)
         command_delay = config.pop(CONF_COMMAND_DELAY, DEFAULT_COMMAND_DELAY)
+        slat_compression_time_down = config.pop(CONF_SLAT_COMPRESSION_TIME_DOWN, DEFAULT_SLAT_COMPRESSION_TIME_DOWN)
+        slat_compression_time_up   = config.pop(CONF_SLAT_COMPRESSION_TIME_UP,   DEFAULT_SLAT_COMPRESSION_TIME_UP)
 
         device = CoverTimeBased(
             device_id=device_id,
@@ -149,6 +164,8 @@ def devices_from_config(domain_config: dict) -> list["CoverTimeBased"]:
             device_class=device_class,
             availability_template=availability_template,
             command_delay=command_delay,
+            slat_compression_time_down=slat_compression_time_down,
+            slat_compression_time_up=slat_compression_time_up,
             unique_id=device_id,
         )
         devices.append(device)
@@ -190,9 +207,16 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
         device_class=data.get(CONF_DEVICE_CLASS, DEFAULT_DEVICE_CLASS),
         availability_template=avail_tpl,
         command_delay=data.get(CONF_COMMAND_DELAY, DEFAULT_COMMAND_DELAY),
+        slat_compression_time_down=data.get(CONF_SLAT_COMPRESSION_TIME_DOWN, DEFAULT_SLAT_COMPRESSION_TIME_DOWN),
+        slat_compression_time_up=data.get(CONF_SLAT_COMPRESSION_TIME_UP, DEFAULT_SLAT_COMPRESSION_TIME_UP),
         unique_id=config_entry.entry_id,
     )
     async_add_entities([device])
+
+    # Register custom entity service
+    from homeassistant.helpers import entity_platform as ep  # noqa: PLC0415
+    platform = ep.async_get_current_platform()
+    platform.async_register_entity_service("set_ajoure", {}, "async_set_ajoure")
 
 
 # ---------------------------------------------------------------------------
@@ -226,6 +250,8 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
         device_class: str | None = DEFAULT_DEVICE_CLASS,
         availability_template=None,
         command_delay: int = DEFAULT_COMMAND_DELAY,
+        slat_compression_time_down: int = DEFAULT_SLAT_COMPRESSION_TIME_DOWN,
+        slat_compression_time_up: int = DEFAULT_SLAT_COMPRESSION_TIME_UP,
         unique_id: str | None = None,
     ) -> None:
         """Initialize the cover."""
@@ -263,6 +289,8 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
         self._device_class_value: str | None = device_class
         self._availability_template = availability_template
         self._command_delay: int = max(int(command_delay), 0)
+        self._slat_compression_time_down: int = max(int(slat_compression_time_down), 0)
+        self._slat_compression_time_up: int   = max(int(slat_compression_time_up), 0)
         self._availability_error_count: int = 0
 
         self._name: str = name if name else device_id
@@ -270,8 +298,26 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
         self._unsubscribe_auto_updater = None
         self._position_uncertain: bool = False
 
+        # Slat-phase state
+        self._is_fully_closed: bool = False      # slats compressed (≠ ajouré)
+        self._slat_phase_running: bool = False   # motor running during slat phase
+        self._slat_phase_cancelled: bool = False # set by stop_cover to abort slat task
+        self._going_to_fully_closed: bool = False  # True ↔ close_cover / set_position(0)
+
+        # Both directions: TravelCalculator uses the EFFECTIVE travel time only
+        # (slat compression/decompression phases are excluded from position tracking)
+        # → set_position(50 %) = truly 50 % of physical shutter travel in both directions
+        #
+        # DOWN: last slat_compression_time_down seconds = slat compression (end of stroke)
+        # UP:   first slat_compression_time_up seconds = slat decompression (start of stroke)
+        pure_travel_time_down = max(
+            self._travel_time_down - self._slat_compression_time_down, 1
+        )
+        pure_travel_time_up = max(
+            self._travel_time_up - self._slat_compression_time_up, 1
+        )
         self._travel_calculator = TravelCalculator(
-            self._travel_time_down, self._travel_time_up
+            pure_travel_time_down, pure_travel_time_up
         )
 
     async def async_added_to_hass(self) -> None:
@@ -288,6 +334,9 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
             )
             was_moving = old_state.state in ("opening", "closing")
             self._position_uncertain = was_moving
+            # Restore fully-closed state so slat decompression works after restart
+            if old_state.attributes.get("is_fully_closed"):
+                self._is_fully_closed = True
             if was_moving:
                 _LOGGER.warning(
                     "%s: HA restarted while cover was moving. "
@@ -353,14 +402,23 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
             ATTR_CONTROL_TYPE: self._control_type,
             ATTR_POSITION_UNCERTAIN: self._position_uncertain,
             CONF_COMMAND_DELAY: self._command_delay,
+            CONF_SLAT_COMPRESSION_TIME_DOWN: self._slat_compression_time_down,
+            CONF_SLAT_COMPRESSION_TIME_UP: self._slat_compression_time_up,
+            ATTR_AJOURE_POSITION: self.ajoure_position,
+            "is_fully_closed": self._is_fully_closed,
         }
 
     @property
     def current_cover_position(self) -> int:
+        if self._is_fully_closed or self._slat_phase_running:
+            return 0
         return self._travel_calculator.current_position()
 
     @property
     def is_opening(self) -> bool:
+        # During slat decompression phase (opening from fully-closed)
+        if self._slat_phase_running and not self._going_to_fully_closed:
+            return True
         return (
             self._travel_calculator.is_traveling()
             and self._travel_calculator.travel_direction == TravelStatus.DIRECTION_UP
@@ -368,6 +426,9 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
 
     @property
     def is_closing(self) -> bool:
+        # During slat compression phase (going to fully-closed)
+        if self._slat_phase_running and self._going_to_fully_closed:
+            return True
         return (
             self._travel_calculator.is_traveling()
             and self._travel_calculator.travel_direction == TravelStatus.DIRECTION_DOWN
@@ -375,11 +436,31 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
 
     @property
     def is_closed(self) -> bool:
-        return self._travel_calculator.is_closed()
+        if self._is_fully_closed:
+            return True
+        # Without slat feature, TC position 0 % == fully closed
+        if self._slat_compression_time_down <= 0:
+            return self._travel_calculator.is_closed()
+        # With slat feature: TC 0 % == ajouré (≠ fully closed)
+        return False
 
     @property
     def assumed_state(self) -> bool:
         return True
+
+    @property
+    def ajoure_position(self) -> int | None:
+        """Position (0-100 %) at which the ajouré state is reached.
+
+        With slat_compression_time_down > 0, TravelCalculator is initialised with
+        the *pure* travel time (travelling_time_down − slat_compression_time_down).
+        Therefore TC position 0 % = ajouré physically.
+        Returns None when slat_compression_time_down == 0 (feature disabled).
+        Use the set_ajoure service to move to this position.
+        """
+        if self._slat_compression_time_down <= 0:
+            return None
+        return 0  # TC 0 % = ajouré (slats not compressed yet)
 
     # ---- Cover commands ----
 
@@ -392,6 +473,8 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
     async def async_close_cover(self, **kwargs) -> None:
         _LOGGER.debug("async_close_cover")
         self._position_uncertain = False
+        # close_cover always goes fully closed (slat compression phase included)
+        self._going_to_fully_closed = self._slat_compression_time_down > 0
         await self._async_apply_command_delay("async_close_cover")
         self._travel_calculator.start_travel_down()
         self.start_auto_updater()
@@ -400,17 +483,69 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
     async def async_open_cover(self, **kwargs) -> None:
         _LOGGER.debug("async_open_cover")
         self._position_uncertain = False
+        self._going_to_fully_closed = False
         await self._async_apply_command_delay("async_open_cover")
-        self._travel_calculator.start_travel_up()
-        self.start_auto_updater()
-        await self._async_handle_command(SERVICE_OPEN_COVER)
+
+        if self._is_fully_closed and self._slat_compression_time_up > 0:
+            # --- Slat decompression phase ---
+            self._is_fully_closed = False
+            self._slat_phase_running = True
+            self.async_write_ha_state()
+            await self._async_handle_command(SERVICE_OPEN_COVER)
+            await asyncio.sleep(self._slat_compression_time_up)
+            if self._slat_phase_cancelled:
+                self._slat_phase_running = False
+                self._slat_phase_cancelled = False
+                self.async_write_ha_state()
+                return
+            self._slat_phase_running = False
+            # Motor already running — just start tracking upward travel
+            self._travel_calculator.start_travel_up()
+            self.start_auto_updater()
+            self.async_write_ha_state()
+        else:
+            self._is_fully_closed = False
+            self._travel_calculator.start_travel_up()
+            self.start_auto_updater()
+            await self._async_handle_command(SERVICE_OPEN_COVER)
 
     async def async_stop_cover(self, **kwargs) -> None:
         _LOGGER.debug("async_stop_cover")
         self._position_uncertain = False
+        # Cancel any in-progress slat phase
+        self._slat_phase_cancelled = True
+        self._slat_phase_running = False
+        self._going_to_fully_closed = False
         await self._async_apply_command_delay("async_stop_cover")
         self._handle_my_button()
         await self._async_handle_command(SERVICE_STOP_COVER)
+
+    async def async_set_ajoure(self) -> None:
+        """Move the cover to the ajouré position.
+
+        Ajouré = TC position 0 % (last slat on ground, slats NOT yet compressed).
+        Requires slat_compression_time_down > 0 in the configuration.
+        """
+        if self._slat_compression_time_down <= 0:
+            _LOGGER.warning(
+                "%s: slat_compression_time_down not configured — "
+                "cannot move to ajouré position. "
+                "Set slat_compression_time_down > 0 in the integration options.",
+                self._name,
+            )
+            return
+        _LOGGER.debug("async_set_ajoure :: moving to ajouré (TC position 0%%)")
+        # Do NOT set _going_to_fully_closed: stop exactly at ajouré
+        self._going_to_fully_closed = False
+        self._position_uncertain = False
+        current_position = self._travel_calculator.current_position()
+        if current_position == 0 and not self._is_fully_closed:
+            return  # Already at ajouré
+        await self._async_apply_command_delay("async_set_ajoure")
+        self._is_fully_closed = False
+        self.start_auto_updater()
+        self._travel_calculator.start_travel(0)
+        await self._async_handle_command(SERVICE_CLOSE_COVER)
 
     async def _async_set_position(self, position: int) -> None:
         """Move the cover to the given position (0–100)."""
@@ -419,18 +554,57 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
         _LOGGER.debug(
             "_async_set_position :: current: %d, target: %d", current_position, position
         )
-        if position < current_position:
-            command = SERVICE_CLOSE_COVER
-        elif position > current_position:
-            command = SERVICE_OPEN_COVER
-        else:
+
+        going_up = position > current_position or self._is_fully_closed
+        going_down = position < current_position and not self._is_fully_closed
+
+        if not going_up and not going_down:
             return
+
         self._position_uncertain = False
-        await self._async_apply_command_delay("_async_set_position")
-        self.start_auto_updater()
-        self._travel_calculator.start_travel(position)
-        _LOGGER.debug("_async_set_position :: command %s", command)
-        await self._async_handle_command(command)
+
+        if going_up:
+            self._going_to_fully_closed = False
+            if self._is_fully_closed and self._slat_compression_time_up > 0:
+                # --- Slat decompression phase (opening from fully-closed) ---
+                _LOGGER.debug(
+                    "_async_set_position :: fully closed → decompressing slats (%ds) "
+                    "before targeting %d%%",
+                    self._slat_compression_time_up,
+                    position,
+                )
+                self._is_fully_closed = False
+                self._slat_phase_running = True
+                self.async_write_ha_state()
+                await self._async_apply_command_delay("_async_set_position")
+                await self._async_handle_command(SERVICE_OPEN_COVER)
+                await asyncio.sleep(self._slat_compression_time_up)
+                if self._slat_phase_cancelled:
+                    self._slat_phase_running = False
+                    self._slat_phase_cancelled = False
+                    self.async_write_ha_state()
+                    return
+                self._slat_phase_running = False
+                # Motor already running — start tracking from position 0 % toward target
+                self._travel_calculator.start_travel(position)
+                self.start_auto_updater()
+                self.async_write_ha_state()
+            else:
+                self._is_fully_closed = False
+                await self._async_apply_command_delay("_async_set_position")
+                self.start_auto_updater()
+                self._travel_calculator.start_travel(position)
+                _LOGGER.debug("_async_set_position :: command %s", SERVICE_OPEN_COVER)
+                await self._async_handle_command(SERVICE_OPEN_COVER)
+        else:
+            # Going down
+            # position == 0 with slat feature → go fully closed (slat compression phase)
+            self._going_to_fully_closed = (position == 0 and self._slat_compression_time_down > 0)
+            await self._async_apply_command_delay("_async_set_position")
+            self.start_auto_updater()
+            self._travel_calculator.start_travel(position)
+            _LOGGER.debug("_async_set_position :: command %s", SERVICE_CLOSE_COVER)
+            await self._async_handle_command(SERVICE_CLOSE_COVER)
 
     # ---- Command delay helper ----
 
@@ -472,11 +646,34 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
 
         - Intermediate positions (1–99 %): ALWAYS send stop (motor must halt).
         - End positions (0 % or 100 %):    send stop only if send_stop_at_end is True.
+        - Position 0 % + going_to_fully_closed: run slat compression phase first.
         """
         if self.position_reached():
             self._travel_calculator.stop()
             current_position = self._travel_calculator.current_position()
-            if 0 < current_position < 100:
+
+            if (
+                current_position == 0
+                and self._going_to_fully_closed
+                and self._slat_compression_time_down > 0
+            ):
+                # --- Slat compression phase ---
+                _LOGGER.debug(
+                    "auto_stop_if_necessary :: ajouré reached, compressing slats (%ds)",
+                    self._slat_compression_time_down,
+                )
+                self._slat_phase_running = True
+                self.async_write_ha_state()
+                await asyncio.sleep(self._slat_compression_time_down)
+                if not self._slat_phase_cancelled:
+                    await self._async_handle_command(SERVICE_STOP_COVER)
+                    self._is_fully_closed = True
+                self._slat_phase_running = False
+                self._slat_phase_cancelled = False
+                self._going_to_fully_closed = False
+                self.async_write_ha_state()
+
+            elif 0 < current_position < 100:
                 _LOGGER.debug(
                     "auto_stop_if_necessary :: intermediate position %d%%, sending stop",
                     current_position,
