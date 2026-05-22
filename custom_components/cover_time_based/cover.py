@@ -421,12 +421,13 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
                     self.async_write_ha_state()
                 return
 
+            # Only react if HA is not already tracking this direction
+            # (avoids double-trigger when HA itself turns on the switch)
             if is_close_switch and not already_going_down:
                 _LOGGER.debug(
                     "%s: physical close detected (switch %s ON) — tracking travel down",
                     self._name, entity_id,
                 )
-                # Stop any opposite movement currently tracked
                 if self._travel_calculator.is_traveling():
                     self._travel_calculator.stop()
                     self.stop_auto_updater()
@@ -435,19 +436,6 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
                 self._is_fully_closed = False
                 self._travel_calculator.start_travel_down()
                 self.start_auto_updater()
-                self.async_write_ha_state()
-
-            elif is_close_switch and already_going_down and self._impulse_mode:
-                # Impulse/toggle mode: pressing close while closing → stop
-                _LOGGER.debug(
-                    "%s: impulse toggle stop detected (close switch %s ON while closing) — freezing position",
-                    self._name, entity_id,
-                )
-                self._travel_calculator.stop()
-                self.stop_auto_updater()
-                self._going_to_fully_closed = False
-                self._slat_phase_cancelled = True
-                self._slat_phase_running = False
                 self.async_write_ha_state()
 
             elif is_open_switch and not already_going_up:
@@ -463,19 +451,6 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
                 self._is_fully_closed = False
                 self._travel_calculator.start_travel_up()
                 self.start_auto_updater()
-                self.async_write_ha_state()
-
-            elif is_open_switch and already_going_up and self._impulse_mode:
-                # Impulse/toggle mode: pressing open while opening → stop
-                _LOGGER.debug(
-                    "%s: impulse toggle stop detected (open switch %s ON while opening) — freezing position",
-                    self._name, entity_id,
-                )
-                self._travel_calculator.stop()
-                self.stop_auto_updater()
-                self._going_to_fully_closed = False
-                self._slat_phase_cancelled = True
-                self._slat_phase_running = False
                 self.async_write_ha_state()
 
         elif new_val == "off" and not self._impulse_mode:
