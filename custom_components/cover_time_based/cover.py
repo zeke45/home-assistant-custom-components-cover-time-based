@@ -25,6 +25,7 @@ from homeassistant.helpers import template as template_helper
 import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.event import async_track_state_change_event, async_track_time_interval
 from homeassistant.helpers.restore_state import RestoreEntity
+from homeassistant.util import dt as dt_util
 
 from .const import (
     ATTR_AJOURE_POSITION,
@@ -304,6 +305,10 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
         self._slat_phase_cancelled: bool = False # set by stop_cover to abort slat task
         self._going_to_fully_closed: bool = False  # True ↔ close_cover / set_position(0)
 
+        # Physical bypass detection — last action detected from relay state change
+        self._last_physical_action: str | None = None      # "open" | "close" | "stop"
+        self._last_physical_action_at: str | None = None   # ISO timestamp
+
         # Both directions: TravelCalculator uses the EFFECTIVE travel time only
         # (slat compression/decompression phases are excluded from position tracking)
         # → set_position(50 %) = truly 50 % of physical shutter travel in both directions
@@ -413,6 +418,8 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
                         "%s: physical stop detected (stop switch %s ON) — freezing position",
                         self._name, entity_id,
                     )
+                    self._last_physical_action = "stop"
+                    self._last_physical_action_at = dt_util.utcnow().isoformat()
                     self._travel_calculator.stop()
                     self.stop_auto_updater()
                     self._going_to_fully_closed = False
@@ -428,6 +435,8 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
                     "%s: physical close detected (switch %s ON) — tracking travel down",
                     self._name, entity_id,
                 )
+                self._last_physical_action = "close"
+                self._last_physical_action_at = dt_util.utcnow().isoformat()
                 if self._travel_calculator.is_traveling():
                     self._travel_calculator.stop()
                     self.stop_auto_updater()
@@ -443,6 +452,8 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
                     "%s: physical open detected (switch %s ON) — tracking travel up",
                     self._name, entity_id,
                 )
+                self._last_physical_action = "open"
+                self._last_physical_action_at = dt_util.utcnow().isoformat()
                 if self._travel_calculator.is_traveling():
                     self._travel_calculator.stop()
                     self.stop_auto_updater()
@@ -460,6 +471,8 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
                     "%s: physical stop detected (switch %s OFF) — freezing position",
                     self._name, entity_id,
                 )
+                self._last_physical_action = "stop"
+                self._last_physical_action_at = dt_util.utcnow().isoformat()
                 self._travel_calculator.stop()
                 self.stop_auto_updater()
                 self._going_to_fully_closed = False
@@ -515,6 +528,8 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
 
     @property
     def extra_state_attributes(self) -> dict:
+        pure_time_down = max(self._travel_time_down - self._slat_compression_time_down, 1)
+        pure_time_up   = max(self._travel_time_up   - self._slat_compression_time_up,   1)
         return {
             CONF_TRAVELLING_TIME_DOWN: self._travel_time_down,
             CONF_TRAVELLING_TIME_UP: self._travel_time_up,
@@ -528,6 +543,17 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
             CONF_SLAT_COMPRESSION_TIME_UP: self._slat_compression_time_up,
             ATTR_AJOURE_POSITION: self.ajoure_position,
             "is_fully_closed": self._is_fully_closed,
+            # --- Diagnostic / calibration attributes ---
+            "pure_travel_time_down": pure_time_down,
+            "pure_travel_time_up": pure_time_up,
+            "slat_phase_running": self._slat_phase_running,
+            "going_to_fully_closed": self._going_to_fully_closed,
+            "tc_position": self._travel_calculator.current_position(),
+            "tc_is_traveling": self._travel_calculator.is_traveling(),
+            "tc_direction": self._travel_calculator.travel_direction,
+            # --- Physical bypass audit ---
+            "last_physical_action": self._last_physical_action,
+            "last_physical_action_at": self._last_physical_action_at,
         }
 
     @property
