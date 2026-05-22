@@ -1,7 +1,7 @@
 # Cover Time Based Component
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
-![version](https://img.shields.io/badge/version-2.6.3-blue)
+![version](https://img.shields.io/badge/version-2.6.4-blue)
 ![maintained](https://img.shields.io/badge/maintained-yes-green)
 ![license](https://img.shields.io/badge/license-MIT-green)
 
@@ -311,6 +311,58 @@ tap_action:
 | `cover.py` | Entité `CoverTimeBased` — logique HA |
 | `config_flow.py` | Flux de configuration et d'options UI |
 | `__init__.py` | Setup, unload, migration de version |
+| `tests/` | Tests unitaires pytest (`TravelCalculator` + validation config flow) |
+
+---
+
+## 📊 Attributs d'état
+
+En plus des attributs standard HA (`current_position`, `is_opening`, etc.), l'entité expose les attributs suivants :
+
+### Attributs principaux
+
+| Attribut | Type | Description |
+|---|---|---|
+| `current_position` | int | Position actuelle (0–100%) |
+| `is_fully_closed` | bool | `true` si le volet est entièrement fermé (lames compressées) |
+| `ajoure_position` | int | Position HA correspondant à l'état ajouré (calculé automatiquement) |
+
+### Attributs de diagnostic / calibration
+
+| Attribut | Type | Description |
+|---|---|---|
+| `pure_travel_time_down` | int | Temps de déplacement effectif en descente (hors phase lames), en secondes |
+| `pure_travel_time_up` | int | Temps de déplacement effectif en montée (hors phase lames), en secondes |
+| `slat_phase_running` | bool | `true` si la phase de compression/décompression des lames est en cours |
+| `going_to_fully_closed` | bool | `true` si une commande de fermeture totale (lames comprises) est en cours |
+| `tc_position` | int | Position interne du `TravelCalculator` (0–100, avant correction ajourée) |
+| `tc_is_traveling` | bool | `true` si le `TravelCalculator` considère le volet en déplacement |
+| `tc_direction` | str | Direction interne : `"up"`, `"down"` ou `None` |
+
+### Attributs d'audit d'actions physiques
+
+| Attribut | Type | Description |
+|---|---|---|
+| `last_physical_action` | str | Dernière action physique détectée : `"open"`, `"close"` ou `"stop"` |
+| `last_physical_action_at` | str | Horodatage ISO de la dernière action physique (ex: `2024-01-15T14:32:05.123456+00:00`) |
+
+> ℹ️ Les attributs `last_physical_action` / `last_physical_action_at` ne sont renseignés qu'en mode **switch** (impulsion ou maintenu), lorsque le relai est actionné directement sans passer par HA.
+
+---
+
+## ✅ Tests unitaires
+
+Le projet inclut une suite de tests pytest exécutable sans installation de Home Assistant :
+
+```bash
+pip install -r requirements-test.txt
+pytest
+```
+
+| Fichier de test | Couverture |
+|---|---|
+| `tests/test_travel_calculator.py` | ~30 tests — logique de position, direction, fin de course |
+| `tests/test_config_flow_validation.py` | ~13 tests — validation des temps (`_validate_timing`) |
 
 ---
 

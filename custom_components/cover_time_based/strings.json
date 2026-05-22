@@ -8,7 +8,7 @@
           "control_type": "Type de contrôle"
         },
         "data_description": {
-          "control_type": "Switch : relais ON/OFF. Script : impulsion RF one-shot. Cover : délégation vers un cover HA existant."
+          "control_type": "Switch impulsion : le relay gère lui-même le retour à OFF (RF, Zigbee…). Switch maintenu : HA gère la durée d'activation. Script : one-shot RF. Cover : délégation."
         }
       },
       "control": {
@@ -33,7 +33,7 @@
           "availability_template": "Template de disponibilité (optionnel)"
         },
         "data_description": {
-          "impulse_mode": "⚠️ Legacy YAML uniquement. En UI, utilisez le type 'Switch impulsion' ou 'Switch maintenu'.",
+          "impulse_mode": "⚠️ Legacy YAML uniquement. En UI, utilisez le type 'Switch impulsion' ou 'Switch maintenu'. Activé : HA envoie uniquement turn_on, le relay gère son retour à OFF.",
           "switch_sustained_time": "0 = switch maintenu pendant tout le déplacement. Ignoré si mode impulsion externe activé.",
           "send_stop_at_end": "Stop automatique en position intermédiaire (1–99%) est toujours envoyé. Cette option ne concerne que les fins de course complètes.",
           "command_delay": "Délai en millisecondes appliqué avant chaque commande physique (ouverture, fermeture, stop).",
@@ -46,7 +46,8 @@
     },
     "error": {
       "travel_time_too_low": "Le temps de déplacement doit être d'au moins 1 seconde.",
-      "switch_required": "L'interrupteur d'ouverture et de fermeture sont obligatoires."
+      "switch_required": "L'interrupteur d'ouverture et de fermeture sont obligatoires.",
+      "slat_time_too_high": "Le temps de compression/décompression des lames doit être strictement inférieur au temps de déplacement total."
     },
     "abort": {
       "already_configured": "Ce volet est déjà configuré."
@@ -91,13 +92,15 @@
           "command_delay": "Délai en millisecondes appliqué avant chaque commande physique.",
           "slat_compression_time_down": "Volets à lames fixes : durée entre 'dernière lame au sol (ajouré)' et 'volet complètement fermé'. Détermine ajoure_position. 0 = désactivé.",
           "slat_compression_time_up": "Durée de décompression des lames au départ de 0% (montée). Souvent ≥ slat_compression_time_down. 0 = désactivé.",
-          "availability_template": "Ex : {{ states('sensor.gateway') == 'online' }}"
+          "availability_template": "Ex : {{ states('sensor.gateway') == 'online' }}",
+          "device_class": "Détermine l'icône et les états affichés dans l'UI."
         }
       }
     },
     "error": {
       "travel_time_too_low": "Le temps de déplacement doit être d'au moins 1 seconde.",
-      "switch_required": "L'interrupteur d'ouverture et de fermeture sont obligatoires."
+      "switch_required": "L'interrupteur d'ouverture et de fermeture sont obligatoires.",
+      "slat_time_too_high": "Le temps de compression/décompression des lames doit être strictement inférieur au temps de déplacement total."
     }
   }
 }
