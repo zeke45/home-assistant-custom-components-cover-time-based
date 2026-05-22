@@ -46,7 +46,8 @@
     },
     "error": {
       "travel_time_too_low": "Travel time must be at least 1 second.",
-      "switch_required": "Open and close switch entities are required."
+      "switch_required": "Open and close switch entities are required.",
+      "slat_time_too_high": "Slat compression/decompression time must be strictly less than the total travel time."
     },
     "abort": {
       "already_configured": "This cover is already configured."
@@ -97,7 +98,8 @@
     },
     "error": {
       "travel_time_too_low": "Travel time must be at least 1 second.",
-      "switch_required": "Open and close switch entities are required."
+      "switch_required": "Open and close switch entities are required.",
+      "slat_time_too_high": "Slat compression/decompression time must be strictly less than the total travel time."
     }
   }
 }
