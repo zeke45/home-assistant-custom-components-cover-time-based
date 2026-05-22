@@ -218,6 +218,11 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
     from homeassistant.helpers import entity_platform as ep  # noqa: PLC0415
     platform = ep.async_get_current_platform()
     platform.async_register_entity_service("set_ajoure", {}, "async_set_ajoure")
+    platform.async_register_entity_service(
+        "set_known_position",
+        {vol.Required("position"): vol.All(vol.Coerce(int), vol.Range(min=0, max=100))},
+        "async_set_known_position",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -667,6 +672,27 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
         await self._async_apply_command_delay("async_stop_cover")
         self._handle_my_button()
         await self._async_handle_command(SERVICE_STOP_COVER)
+
+    async def async_set_known_position(self, position: int) -> None:
+        """Force the internal position without sending any command to the motor.
+
+        Useful after RF desync, HA restart during movement, or manual calibration.
+        Resets position_uncertain flag and updates is_fully_closed consistently.
+        """
+        _LOGGER.debug("async_set_known_position: %d", position)
+        # Cancel any in-progress travel
+        if self._travel_calculator.is_traveling():
+            self._travel_calculator.stop()
+        self.stop_auto_updater()
+        self._slat_phase_cancelled = True
+        self._slat_phase_running = False
+        self._going_to_fully_closed = False
+        # Force position
+        self._travel_calculator.set_position(position)
+        self._position_uncertain = False
+        # Sync is_fully_closed: True only when pos==0 AND slat feature is active
+        self._is_fully_closed = (position == 0 and self._slat_compression_time_down > 0)
+        self.async_write_ha_state()
 
     async def async_set_ajoure(self) -> None:
         """Move the cover to the ajouré position.
