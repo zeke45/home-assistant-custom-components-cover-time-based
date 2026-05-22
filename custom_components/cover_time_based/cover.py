@@ -515,6 +515,8 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
 
     @property
     def extra_state_attributes(self) -> dict:
+        pure_time_down = max(self._travel_time_down - self._slat_compression_time_down, 1)
+        pure_time_up   = max(self._travel_time_up   - self._slat_compression_time_up,   1)
         return {
             CONF_TRAVELLING_TIME_DOWN: self._travel_time_down,
             CONF_TRAVELLING_TIME_UP: self._travel_time_up,
@@ -528,6 +530,14 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
             CONF_SLAT_COMPRESSION_TIME_UP: self._slat_compression_time_up,
             ATTR_AJOURE_POSITION: self.ajoure_position,
             "is_fully_closed": self._is_fully_closed,
+            # --- Diagnostic / calibration attributes ---
+            "pure_travel_time_down": pure_time_down,
+            "pure_travel_time_up": pure_time_up,
+            "slat_phase_running": self._slat_phase_running,
+            "going_to_fully_closed": self._going_to_fully_closed,
+            "tc_position": self._travel_calculator.current_position(),
+            "tc_is_traveling": self._travel_calculator.is_traveling(),
+            "tc_direction": self._travel_calculator.travel_direction,
         }
 
     @property
