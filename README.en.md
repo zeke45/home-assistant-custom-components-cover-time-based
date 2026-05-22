@@ -199,6 +199,7 @@ In **switch** mode (impulse or sustained), the component monitors the state of o
 | `cover.close_cover` | Closes the cover |
 | `cover.stop_cover` | Stops the cover |
 | `cover.set_cover_position` | Sets cover to X% (e.g. 50%) |
+| `cover_time_based.set_known_position` | Forces internal position without moving the cover (re-sync). Field: `position` (0–100%). |
 | `cover_time_based.set_ajoure` | Moves cover to ajouré position (last slat on ground, light passes through). Requires `slat_compression_time_down > 0`. |
 
 ---
