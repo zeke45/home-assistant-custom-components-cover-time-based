@@ -218,8 +218,45 @@ class CoverTimeBasedConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._name: str = ""
         self._control_type: str = CONTROL_TYPE_SWITCH_IMPULSE
 
+    async def async_step_import(self, import_data: dict):
+        """Handle import from YAML configuration (idempotent).
+
+        Called automatically by async_setup_platform for each YAML device.
+        Aborts if a config entry with the same device_id (unique_id) already exists.
+        """
+        device_id = import_data.get("device_id", "")
+        # Idempotency check: abort if already imported
+        for entry in self._async_current_entries():
+            if entry.unique_id == device_id:
+                return self.async_abort(reason="already_configured")
+
+        await self.async_set_unique_id(device_id)
+
+        name = import_data.get(CONF_NAME, device_id)
+        # Build options from import_data (exclude internal keys)
+        options = {
+            k: v for k, v in import_data.items()
+            if k not in ("device_id", CONF_NAME)
+        }
+        # Normalize legacy control_type=switch → switch_impulse / switch_sustained
+        control_type = options.get(CONF_CONTROL_TYPE, CONTROL_TYPE_SWITCH_IMPULSE)
+        if control_type == CONTROL_TYPE_SWITCH:
+            impulse = options.get(CONF_IMPULSE_MODE, True)
+            options[CONF_CONTROL_TYPE] = (
+                CONTROL_TYPE_SWITCH_IMPULSE if impulse else CONTROL_TYPE_SWITCH_SUSTAINED
+            )
+
+        import logging as _log  # noqa: PLC0415
+        _log.getLogger(__name__).info(
+            "cover_time_based: importing YAML device '%s' as UI config entry", device_id
+        )
+        return self.async_create_entry(
+            title=name,
+            data={CONF_NAME: name},
+            options=options,
+        )
+
     async def async_step_user(self, user_input=None):
-        """Step 1: name + control type."""
         errors = {}
         if user_input is not None:
             self._name = user_input[CONF_NAME]

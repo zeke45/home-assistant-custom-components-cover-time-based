@@ -1,7 +1,7 @@
 # Cover Time Based Component
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
-![version](https://img.shields.io/badge/version-2.6.4-blue)
+![version](https://img.shields.io/badge/version-2.7.0-blue)
 ![maintained](https://img.shields.io/badge/maintained-yes-green)
 ![license](https://img.shields.io/badge/license-MIT-green)
 
@@ -73,6 +73,14 @@ Depuis **Paramètres → Appareils et services → Cover Time Based → Configur
 
 ## 📝 Configuration YAML (legacy)
 
+> 💡 **Migration automatique vers l'UI** : au démarrage de HA, chaque appareil déclaré en YAML est automatiquement migré en entrée de configuration UI (via `SOURCE_IMPORT`). La migration est **idempotente** — elle s'arrête si l'entrée existe déjà. Une fois la migration confirmée dans **Paramètres → Appareils et services**, vous pouvez retirer le bloc YAML de `configuration.yaml`.
+
+
+
+### Mode Switch (relais ON/OFF)
+
+```yaml
+cover:
   - platform: cover_time_based
     devices:
       volet_salon:
@@ -205,7 +213,7 @@ En mode **switch** (impulsion ou maintenu), le composant surveille l'état des r
 | Relai ouverture → ON | Suivi montée démarré ↑ | Suivi montée démarré ↑ |
 | Relai → OFF | Ignoré (impulsion brève) | Position figée (moteur arrêté) |
 
-> ℹ️ **Modes script et cover** : la détection automatique n'est pas possible car ces modes ne disposent pas d'état "moteur en marche" observable dans HA. Vous pouvez resynchroniser la position manuellement via `cover.set_cover_position` (sans déplacer physiquement le volet, si `send_stop_at_end: false`).
+> ℹ️ **Modes script et cover** : En mode **cover** (délégation), le composant surveille désormais les changements d'état du cover délégué. Si celui-ci démarre une ouverture ou fermeture en dehors de HA, la position est suivie automatiquement. En mode **script**, la détection automatique n'est pas possible car ces modes ne disposent pas d'état "moteur en marche" observable dans HA.
 
 ---
 
@@ -217,6 +225,7 @@ En mode **switch** (impulsion ou maintenu), le composant surveille l'état des r
 | `cover.close_cover` | Ferme le volet |
 | `cover.stop_cover` | Arrête le volet |
 | `cover.set_cover_position` | Positionne le volet à X% (ex: 50%) |
+| `cover_time_based.set_known_position` | Force la position interne sans bouger le volet (resynchronisation). Champ : `position` (0-100%). |
 | `cover_time_based.set_ajoure` | Déplace le volet en position ajourée (lame au sol, lumière passe). Requiert `slat_compression_time_down > 0`. |
 
 ---

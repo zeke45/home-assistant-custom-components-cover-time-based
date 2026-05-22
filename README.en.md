@@ -1,7 +1,7 @@
 # Cover Time Based Component
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
-![version](https://img.shields.io/badge/version-2.6.4-blue)
+![version](https://img.shields.io/badge/version-2.7.0-blue)
 ![maintained](https://img.shields.io/badge/maintained-yes-green)
 ![license](https://img.shields.io/badge/license-MIT-green)
 
@@ -74,6 +74,10 @@ From **Settings → Devices & Services → Cover Time Based → Configure**:
 ---
 
 ## 📝 YAML Configuration (legacy)
+
+> 💡 **Automatic migration to UI**: on HA startup, each YAML-configured device is automatically migrated to a UI config entry (via `SOURCE_IMPORT`). The migration is **idempotent** — it aborts silently if the entry already exists. Once migration is confirmed in **Settings → Devices & Services**, you can remove the YAML block from `configuration.yaml`.
+
+
 
 ### Switch mode (ON/OFF relay)
 
@@ -193,7 +197,7 @@ In **switch** mode (impulse or sustained), the component monitors the state of o
 | Stop relay → ON | Position frozen immediately | Position frozen immediately |
 | Relay → OFF | Ignored (brief pulse) | Position frozen (motor stopped) |
 
-> ℹ️ **Script and cover modes**: automatic detection is not possible as these modes have no observable "motor running" state in HA. You can manually resync the position via `cover.set_cover_position`.
+> ℹ️ **Cover delegation mode**: the component now monitors state changes of the delegated cover entity. If it starts opening or closing externally (wall button, native app), position is tracked automatically. **Script mode**: automatic detection is not possible as scripts have no observable "motor running" state in HA.
 
 ---
 
@@ -205,6 +209,7 @@ In **switch** mode (impulse or sustained), the component monitors the state of o
 | `cover.close_cover` | Closes the cover |
 | `cover.stop_cover` | Stops the cover |
 | `cover.set_cover_position` | Sets cover to X% (e.g. 50%) |
+| `cover_time_based.set_known_position` | Forces internal position without moving the cover (re-sync). Field: `position` (0–100%). |
 | `cover_time_based.set_ajoure` | Moves cover to ajouré position (last slat on ground, light passes through). Requires `slat_compression_time_down > 0`. |
 
 ---
