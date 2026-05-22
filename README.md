@@ -219,6 +219,7 @@ En mode **switch** (impulsion ou maintenu), le composant surveille l'état des r
 | `cover.close_cover` | Ferme le volet |
 | `cover.stop_cover` | Arrête le volet |
 | `cover.set_cover_position` | Positionne le volet à X% (ex: 50%) |
+| `cover_time_based.set_known_position` | Force la position interne sans bouger le volet (resynchronisation). Champ : `position` (0-100%). |
 | `cover_time_based.set_ajoure` | Déplace le volet en position ajourée (lame au sol, lumière passe). Requiert `slat_compression_time_down > 0`. |
 
 ---

@@ -1,3 +1,25 @@
+set_known_position:
+  name: Forcer la position connue
+  description: >
+    Force la position interne à une valeur donnée sans envoyer de commande au moteur.
+    Utile pour resynchroniser la position après une désynchronisation RF, un redémarrage
+    de HA pendant un déplacement, ou une calibration manuelle après modification des temps.
+    Réinitialise également le flag position_uncertain.
+  target:
+    entity:
+      domain: cover
+      integration: cover_time_based
+  fields:
+    position:
+      name: Position
+      description: Position à forcer (0-100%)
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 100
+          unit_of_measurement: "%"
+
 set_ajoure:
   name: Mettre en position ajourée
   description: >
