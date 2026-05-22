@@ -4,7 +4,7 @@ from __future__ import annotations
 import uuid
 import voluptuous as vol
 from homeassistant import config_entries
-from homeassistant.const import CONF_NAME
+from homeassistant.const import CONF_DEVICE_CLASS, CONF_NAME
 from homeassistant.helpers import selector
 
 from .const import (
@@ -15,11 +15,12 @@ from .const import (
     CONF_COMMAND_DELAY,
     CONF_CONTROL_TYPE,
     CONF_COVER_ENTITY_ID,
-    CONF_DEVICE_CLASS,
     CONF_IMPULSE_MODE,
     CONF_OPEN_SCRIPT_ENTITY_ID,
     CONF_OPEN_SWITCH_ENTITY_ID,
     CONF_SEND_STOP_AT_END,
+    CONF_SLAT_COMPRESSION_TIME_DOWN,
+    CONF_SLAT_COMPRESSION_TIME_UP,
     CONF_STOP_SCRIPT_ENTITY_ID,
     CONF_STOP_SWITCH_ENTITY_ID,
     CONF_TRAVELLING_TIME_DOWN,
@@ -34,6 +35,8 @@ from .const import (
     DEFAULT_COMMAND_DELAY,
     DEFAULT_IMPULSE_MODE,
     DEFAULT_SEND_STOP_AT_END,
+    DEFAULT_SLAT_COMPRESSION_TIME_DOWN,
+    DEFAULT_SLAT_COMPRESSION_TIME_UP,
     DEFAULT_TRAVEL_TIME,
     DOMAIN,
 )
@@ -56,6 +59,10 @@ def _build_common_schema(data: dict) -> dict:
             )),
         vol.Optional(CONF_AVAILABILITY_TEMPLATE, default=data.get(CONF_AVAILABILITY_TEMPLATE, "")):
             selector.TemplateSelector(),
+        vol.Optional(CONF_SLAT_COMPRESSION_TIME_DOWN, default=data.get(CONF_SLAT_COMPRESSION_TIME_DOWN, DEFAULT_SLAT_COMPRESSION_TIME_DOWN)):
+            selector.NumberSelector(selector.NumberSelectorConfig(min=0, max=60, step=1, mode=selector.NumberSelectorMode.BOX)),
+        vol.Optional(CONF_SLAT_COMPRESSION_TIME_UP, default=data.get(CONF_SLAT_COMPRESSION_TIME_UP, DEFAULT_SLAT_COMPRESSION_TIME_UP)):
+            selector.NumberSelector(selector.NumberSelectorConfig(min=0, max=60, step=1, mode=selector.NumberSelectorMode.BOX)),
     }
 
 
@@ -123,9 +130,13 @@ def _build_cover_schema(data: dict) -> vol.Schema:
     })
 
 
-def _build_control_type_schema(current: str) -> vol.Schema:
-    """Return a schema with a control_type selector pre-filled with *current*."""
-    return vol.Schema({
+def _build_control_type_schema(current: str) -> dict:
+    """Return schema FIELDS (dict) for the control_type selector pre-filled with *current*.
+
+    Returns a plain dict so callers can merge it with other fields using **unpacking,
+    or wrap it directly in vol.Schema().
+    """
+    return {
         vol.Required(CONF_CONTROL_TYPE, default=current):
             selector.SelectSelector(selector.SelectSelectorConfig(
                 options=[
@@ -137,7 +148,7 @@ def _build_control_type_schema(current: str) -> vol.Schema:
                 mode=selector.SelectSelectorMode.LIST,
                 translation_key="control_type",
             )),
-    })
+    }
 
 
 def _get_control_schema(control_type: str, data: dict) -> vol.Schema:
@@ -161,7 +172,8 @@ def _normalize(user_input: dict) -> dict:
         if not user_input.get(key):
             user_input[key] = None
     for key in (CONF_TRAVELLING_TIME_DOWN, CONF_TRAVELLING_TIME_UP,
-                CONF_SWITCH_SUSTAINED_TIME, CONF_COMMAND_DELAY):
+                CONF_SWITCH_SUSTAINED_TIME, CONF_COMMAND_DELAY,
+                CONF_SLAT_COMPRESSION_TIME_DOWN, CONF_SLAT_COMPRESSION_TIME_UP):
         if key in user_input:
             user_input[key] = int(user_input[key])
     return user_input
@@ -186,7 +198,7 @@ class CoverTimeBasedConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         schema = vol.Schema({
             vol.Required(CONF_NAME): selector.TextSelector(),
-            **_build_control_type_schema(CONTROL_TYPE_SWITCH),
+            **_build_control_type_schema(CONTROL_TYPE_SWITCH_IMPULSE),
         })
         return self.async_show_form(step_id="user", data_schema=schema, errors=errors)
 
@@ -232,7 +244,7 @@ class CoverTimeBasedOptionsFlow(config_entries.OptionsFlow):
 
         return self.async_show_form(
             step_id="init",
-            data_schema=_build_control_type_schema(current_control_type),
+            data_schema=vol.Schema(_build_control_type_schema(current_control_type)),
         )
 
     async def async_step_options(self, user_input=None):

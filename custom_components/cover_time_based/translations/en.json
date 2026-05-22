@@ -27,6 +27,8 @@
           "travelling_time_up": "Travel time up (seconds)",
           "send_stop_at_end": "Send stop at full end position (0% or 100%)",
           "command_delay": "Command delay (ms, 0 = immediate)",
+          "slat_compression_time_down": "Slat compression time going down (s, 0 = disabled)",
+          "slat_compression_time_up": "Slat decompression time going up (s, 0 = disabled)",
           "device_class": "Device class (optional)",
           "availability_template": "Availability template (optional)"
         },
@@ -35,6 +37,8 @@
           "switch_sustained_time": "0 = switch stays ON during movement. Ignored when external impulse mode is enabled.",
           "send_stop_at_end": "Stop at intermediate positions (1–99%) is always sent unconditionally. This option only affects full end positions.",
           "command_delay": "Delay in milliseconds applied before each physical command (open, close, stop).",
+          "slat_compression_time_down": "Fixed-slat shutters: time between 'last slat on ground (ajouré)' and 'fully closed'. Determines ajoure_position attribute. 0 = disabled.",
+          "slat_compression_time_up": "Time for slats to decompress when starting from 0% (opening). Usually ≥ slat_compression_time_down. 0 = disabled.",
           "availability_template": "E.g.: {{ states('sensor.gateway') == 'online' }}",
           "device_class": "Determines the icon and states displayed in the UI."
         }
@@ -75,6 +79,8 @@
           "travelling_time_up": "Travel time up (seconds)",
           "send_stop_at_end": "Send stop at full end position (0% or 100%)",
           "command_delay": "Command delay (ms, 0 = immediate)",
+          "slat_compression_time_down": "Slat compression time going down (s, 0 = disabled)",
+          "slat_compression_time_up": "Slat decompression time going up (s, 0 = disabled)",
           "device_class": "Device class (optional)",
           "availability_template": "Availability template (optional)"
         },
@@ -83,6 +89,8 @@
           "switch_sustained_time": "0 = switch stays ON. Ignored when external impulse mode is enabled.",
           "send_stop_at_end": "Intermediate stop (1–99%) always sent. This option only affects 0% and 100%.",
           "command_delay": "Delay in milliseconds applied before each physical command.",
+          "slat_compression_time_down": "Fixed-slat shutters: time between 'last slat on ground (ajouré)' and 'fully closed'. Determines ajoure_position attribute. 0 = disabled.",
+          "slat_compression_time_up": "Time for slats to decompress when starting from 0% (opening). Usually ≥ slat_compression_time_down. 0 = disabled.",
           "availability_template": "E.g.: {{ states('sensor.gateway') == 'online' }}"
         }
       }

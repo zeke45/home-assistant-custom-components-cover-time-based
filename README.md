@@ -1,7 +1,7 @@
 # Cover Time Based Component
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
-![version](https://img.shields.io/badge/version-2.5.1-blue)
+![version](https://img.shields.io/badge/version-2.6.3-blue)
 ![maintained](https://img.shields.io/badge/maintained-yes-green)
 ![license](https://img.shields.io/badge/license-MIT-green)
 
@@ -26,6 +26,8 @@ Prend en charge les relais ON/OFF (switch), les scripts RF impulsionnels et la d
 - 🔄 **Rechargement automatique** à chaque modification des options
 - ⏳ **Délai de commande** configurable (ms) pour échelonner les commandes simultanées
 - 🔀 **Changement de type de contrôle** possible depuis les options UI (sans recréer l'intégration)
+- 🪟 **Position ajourée** pour volets à lames fixes : service `cover_time_based.set_ajoure` + attribut `ajoure_position` calculé automatiquement
+- 🔁 **Détection des actions physiques** (mode switch) : si le relai est actionné directement (bouton mural, télécommande), HA suit automatiquement la position sans intervention
 
 ---
 
@@ -181,11 +183,27 @@ cover:
 | `device_class` | string | `null` | shutter, blind, curtain, garage... |
 | `availability_template` | template | `null` | Template de disponibilité |
 | `command_delay` | int | `0` | Délai avant envoi de commande (ms, 0–10000) |
+| `slat_compression_time_down` | int | `0` | Durée compression lames en bas de course descente (secondes). Active la position ajourée. |
+| `slat_compression_time_up` | int | `0` | Durée décompression lames en bas de course montée (secondes). Souvent ≥ `slat_compression_time_down`. |
 
 > ℹ️ **YAML uniquement :** `control_type: switch` + `impulse_mode: true/false` + `button_auto_return_time` restent supportés pour la rétrocompatibilité (`button_auto_return_time` est automatiquement migré vers `switch_sustained_time` au premier démarrage).  
 > En UI, utilisez directement `switch_impulse` ou `switch_sustained` — `impulse_mode` n'apparaît plus.
 
 > ℹ️ Le stop en position intermédiaire (1-99%) est **toujours envoyé** automatiquement.
+
+---
+
+## 🔁 Détection des actions physiques (bypass switch)
+
+En mode **switch** (impulsion ou maintenu), le composant surveille l'état des relais d'ouverture et de fermeture. Si vous actionnez directement le relai sans passer par HA (bouton mural, télécommande RF, test physique), HA détecte le changement et **suit la position automatiquement**.
+
+| Événement physique | Mode impulsion | Mode maintenu |
+|---|---|---|
+| Relai fermeture → ON | Suivi descente démarré ↓ | Suivi descente démarré ↓ |
+| Relai ouverture → ON | Suivi montée démarré ↑ | Suivi montée démarré ↑ |
+| Relai → OFF | Ignoré (impulsion brève) | Position figée (moteur arrêté) |
+
+> ℹ️ **Modes script et cover** : la détection automatique n'est pas possible car ces modes ne disposent pas d'état "moteur en marche" observable dans HA. Vous pouvez resynchroniser la position manuellement via `cover.set_cover_position` (sans déplacer physiquement le volet, si `send_stop_at_end: false`).
 
 ---
 
@@ -197,6 +215,90 @@ cover:
 | `cover.close_cover` | Ferme le volet |
 | `cover.stop_cover` | Arrête le volet |
 | `cover.set_cover_position` | Positionne le volet à X% (ex: 50%) |
+| `cover_time_based.set_ajoure` | Déplace le volet en position ajourée (lame au sol, lumière passe). Requiert `slat_compression_time_down > 0`. |
+
+---
+
+## 🪟 Volets à lames fixes ajourées
+
+Certains volets à tablier possèdent des lames fixes qui permettent deux états en bas de course :
+
+- **Ajouré** : la dernière lame repose au sol, les lames ne sont pas compressées → la lumière passe encore
+- **Fermé** : le moteur continue quelques secondes, les lames se chevauchent et bloquent la lumière
+
+### Principe du calcul de position
+
+Le composant exclut automatiquement les phases de lames du calcul de position afin que **50% signifie vraiment 50%** de déplacement physique du tablier :
+
+| Direction | Phase lames | Moment | Durée exclue du calcul |
+|---|---|---|---|
+| ⬇️ Descente | Compression | **Fin** de course | `slat_compression_time_down` |
+| ⬆️ Montée | Décompression | **Début** de course | `slat_compression_time_up` |
+
+> **Exemple** : `travelling_time_down = 25s`, `slat_compression_time_down = 3s`  
+> → Temps effectif = 22s  
+> → `set_cover_position(50%)` = 11s de déplacement réel → **50% physique exact** ✓  
+> _(sans correction : 12,5s → 9,5s réel → 43% physique)_
+
+### Configuration
+
+```yaml
+cover:
+  - platform: cover_time_based
+    devices:
+      volet_salon:
+        name: Volet Salon
+        travelling_time_down: 25   # temps TOTAL (inclut la compression des lames)
+        travelling_time_up: 26     # temps TOTAL (inclut la décompression des lames)
+        slat_compression_time_down: 3   # 3s de compression en fin de descente
+        slat_compression_time_up: 4     # 4s de décompression en début de montée
+```
+
+### Calibration
+
+Pour trouver les bonnes valeurs :
+
+1. **`slat_compression_time_down`** : fermez complètement (`close_cover`), puis ouvrez légèrement (`set_cover_position: 1`). Mesurez le temps entre le moment où la dernière lame touche le sol et l'arrêt du moteur.
+2. **`slat_compression_time_up`** : depuis état fermé, déclenchez l'ouverture et mesurez le temps avant que le tablier commence à remonter physiquement.
+
+### Résultat
+
+Avec `slat_compression_time_down = 3s` et `travelling_time_down = 25s` :
+- Temps effectif descente = 22s
+- `ajoure_position = 0` (la position TravelCalculator 0% = ajouré physique)
+- `set_cover_position(50%)` → 11s de déplacement réel → 50% exact ✓
+- `close_cover` → descend jusqu'à ajouré (22s) puis compresse les lames (3s) → `is_fully_closed = true`
+
+### Utilisation
+
+**Via le service :**
+```yaml
+service: cover_time_based.set_ajoure
+target:
+  entity_id: cover.volet_salon
+```
+
+**Via une automatisation avec l'attribut :**
+```yaml
+service: cover.set_cover_position
+target:
+  entity_id: cover.volet_salon
+data:
+  position: "{{ state_attr('cover.volet_salon', 'ajoure_position') }}"
+```
+
+**Via un bouton dans le dashboard :**
+```yaml
+type: button
+name: Ajouré
+tap_action:
+  action: perform-action
+  perform_action: cover_time_based.set_ajoure
+  target:
+    entity_id: cover.volet_salon
+```
+
+> ℹ️ Si `slat_compression_time_down` est à `0` (défaut), la fonctionnalité est désactivée et le service `set_ajoure` logguera un avertissement.
 
 ---
 

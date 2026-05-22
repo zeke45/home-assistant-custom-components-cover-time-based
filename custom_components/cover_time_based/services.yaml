@@ -1,3 +1,12 @@
-# services.yaml — aucun service custom enregistré pour le moment.
-# Le service send_command (vestige de l'ancienne version) a été supprimé
-# car il n'était jamais enregistré dans le code.
+set_ajoure:
+  name: Mettre en position ajourée
+  description: >
+    Déplace le volet en position ajourée : la dernière lame repose sur le sol
+    mais les lames ne sont pas compressées — la lumière passe encore.
+    Nécessite que slat_compression_time_down > 0 dans la configuration.
+    La position cible (ajoure_position) est calculée automatiquement depuis
+    slat_compression_time_down / travelling_time_down × 100.
+  target:
+    entity:
+      domain: cover
+      integration: cover_time_based

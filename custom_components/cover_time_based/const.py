@@ -8,6 +8,10 @@ CONF_ALIASES = "aliases"
 CONF_TRAVELLING_TIME_DOWN = "travelling_time_down"
 CONF_TRAVELLING_TIME_UP = "travelling_time_up"
 
+# Slatted shutter — ajouré phase (fixed-slat roller shutters)
+CONF_SLAT_COMPRESSION_TIME_DOWN = "slat_compression_time_down"
+CONF_SLAT_COMPRESSION_TIME_UP   = "slat_compression_time_up"
+
 # Control type
 CONF_CONTROL_TYPE = "control_type"
 CONTROL_TYPE_SWITCH = "switch"            # legacy YAML (switch + impulse_mode flag)
@@ -40,6 +44,7 @@ CONF_COMMAND_DELAY = "command_delay"
 # Attributes exposed in extra_state_attributes
 ATTR_POSITION_UNCERTAIN = "position_uncertain"
 ATTR_CONTROL_TYPE = "control_type"
+ATTR_AJOURE_POSITION = "ajoure_position"
 
 # Default values
 DEFAULT_TRAVEL_TIME = 25
@@ -48,6 +53,8 @@ DEFAULT_SEND_STOP_AT_END = False
 DEFAULT_IMPULSE_MODE = True
 DEFAULT_DEVICE_CLASS = None
 DEFAULT_COMMAND_DELAY = 0  # ms
+DEFAULT_SLAT_COMPRESSION_TIME_DOWN = 0  # seconds; 0 = feature disabled
+DEFAULT_SLAT_COMPRESSION_TIME_UP   = 0  # seconds; 0 = feature disabled
 
 # Cover device classes available in the UI
 COVER_DEVICE_CLASSES = [
