@@ -209,10 +209,16 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
     from .const import DOMAIN  # noqa: PLC0415
     for device_id, device_config in raw_devices.items():
         name = device_config.pop(CONF_NAME, device_id)
+        # Voluptuous cv.template converts template strings to Template objects.
+        # Config entry options must be JSON-serializable → convert back to str.
+        sanitized_config = {
+            k: (v.template if isinstance(v, template_helper.Template) else v)
+            for k, v in device_config.items()
+        }
         import_data = {
             "device_id": device_id,
             CONF_NAME: name,
-            **device_config,
+            **sanitized_config,
         }
         hass.async_create_task(
             hass.config_entries.flow.async_init(
@@ -235,6 +241,9 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
     name = config_entry.title or data.get(CONF_NAME, config_entry.entry_id)
 
     avail_tpl_str = data.get(CONF_AVAILABILITY_TEMPLATE)
+    # Defensive: if a Template object was stored (e.g. old YAML migration), unwrap it
+    if isinstance(avail_tpl_str, template_helper.Template):
+        avail_tpl_str = avail_tpl_str.template
     avail_tpl = template_helper.Template(avail_tpl_str, hass) if avail_tpl_str else None
 
     device = CoverTimeBased(
