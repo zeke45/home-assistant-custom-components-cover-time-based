@@ -281,6 +281,10 @@ tap_action:
     entity_id: cover.living_room_cover
 ```
 
+> ℹ️ If `slat_compression_time_down` is `0` (default), the feature is disabled and the `set_ajoure` service will log a warning.
+
+> ⚠️ **Behavior after a stop during the slat phase**: if `stop_cover` is sent while `slat_phase_running = true`, the close is interrupted and `is_fully_closed` remains `false`. The next `close_cover` command restarts cleanly from scratch: it resets the internal state and re-runs the full sequence (travel down + slat compression).
+
 ---
 
 ## 🗂️ Code architecture
@@ -347,8 +351,60 @@ pytest
 
 ---
 
+## 🗒️ Changelog
+
+### v2.7.0 — Critical bugfixes: slat phase & YAML migration
+
+#### 🐛 Bugs fixed
+
+**1 — Spurious STOP sent 1-2s after relaunching `close_cover` (slat covers)**
+
+When a previous close was interrupted by `stop_cover`, the internal flag `_slat_phase_cancelled` was left as `True`. On the next `close_cover` call, the slat compression phase was silently aborted, `_is_fully_closed` was never set to `True`, and the cover was shown as **open at 0%** in HA.
+
+Additionally, if `slat_compression_time_down > 0` and the internal position was already at 0%, `start_travel_down()` made `position_reached()` return `True` immediately, triggering a motor STOP almost instantly after the CLOSE command.
+
+> **Fix:** Reset `_slat_phase_cancelled`, `_slat_phase_running` and `_auto_stop_running` at the start of `async_close_cover`, `async_open_cover` and `_async_set_position`. If the TravelCalculator is already at 0%, the slat phase is executed directly inline in `async_close_cover` without going through the auto-updater.
+
+---
+
+**2 — Transient "open" state published during slat compression phase**
+
+Symptom observed in HA logs:
+```
+00:00:22 → Cover Lounge has been opened   ← bug !
+00:00:22 → Cover Lounge is closing
+00:00:25 → Cover Lounge has been closed
+```
+
+When `position_reached()` became `True`, `is_traveling()` returned `False`. During the short window before `auto_stop_if_necessary` set `_slat_phase_running = True`, HA published an inconsistent state: `is_closing = False`, `is_closed = False`, `position = 0%` → interpreted as **"open"**.
+
+> **Fix:** `_slat_phase_running = True` is now set **synchronously** in `auto_updater_hook` before `async_schedule_update_ha_state()`, eliminating the transient state.
+
+---
+
+**3 — Race condition: multiple concurrent `auto_stop_if_necessary` tasks**
+
+`auto_stop_if_necessary` was spawned as a new asyncio task every 100 ms without checking if a previous task was still running (during the `asyncio.sleep` of the slat phase). Multiple tasks could concurrently enter the slat phase, send duplicate STOP commands, or corrupt `_is_fully_closed` / `_going_to_fully_closed` flags.
+
+> **Fix:** Added `_auto_stop_running` boolean guard. Only one `auto_stop_if_necessary` task runs at a time. The flag is always released in a `try/finally` block.
+
+---
+
+**4 — YAML → UI migration: `TypeError: Type is not JSON serializable: Template`**
+
+The voluptuous `cv.template` validator converts YAML template strings into `Template` objects at validation time. These objects were stored as-is in config entry options, making HA persistence fail (`json_bytes` cannot serialize a `Template` object). This also caused a `TypeError: Expected template to be a string` on next startup.
+
+> **Fix:** Template objects are converted back to raw strings (`v.template`) in `async_setup_platform` before being stored. Defensive `isinstance` check added in `async_setup_entry` for existing corrupted entries.
+
+---
+
+### v2.6.3 and earlier
+
+See commit history on [GitHub](https://github.com/zeke45/home-assistant-custom-components-cover-time-based/commits/main).
+
+---
+
 ## 📜 Credits
 
 Based on the original project by [@davidramosweb](https://github.com/davidramosweb/home-assistant-custom-components-cover-time-based).  
 Improvements inspired by [@barmazu](https://github.com/barmazu/home-assistant-custom-components-cover-rf-time-based).
-

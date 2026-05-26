@@ -311,6 +311,8 @@ tap_action:
 
 > ℹ️ Si `slat_compression_time_down` est à `0` (défaut), la fonctionnalité est désactivée et le service `set_ajoure` logguera un avertissement.
 
+> ⚠️ **Comportement après un stop en cours de phase lames** : si un `stop_cover` est envoyé pendant la phase de compression (`slat_phase_running = true`), la fermeture est interrompue et `is_fully_closed` reste `false`. La prochaine commande `close_cover` reprend proprement depuis le début : elle réinitialise l'état interne et relance la séquence complète (descente + compression).
+
 ---
 
 ## 🗂️ Architecture du code
@@ -374,6 +376,59 @@ pytest
 |---|---|
 | `tests/test_travel_calculator.py` | ~30 tests — logique de position, direction, fin de course |
 | `tests/test_config_flow_validation.py` | ~13 tests — validation des temps (`_validate_timing`) |
+
+---
+
+## 🗒️ Changelog
+
+### v2.7.0 — Corrections critiques phase lames & migration YAML
+
+#### 🐛 Bugs corrigés
+
+**1 — Stop intempestif 1-2s après relance d'un `close_cover` (volet à lames)**
+
+Quand une fermeture précédente avait été interrompue par un `stop_cover`, le flag interne `_slat_phase_cancelled` restait à `True`. À la prochaine commande `close_cover`, la phase de compression des lames était silencieusement annulée, `_is_fully_closed` n'était jamais mis à `True`, et le volet était affiché comme **ouvert à 0%** dans HA.
+
+De plus, si `slat_compression_time_down > 0` et que la position interne était déjà à 0%, `start_travel_down()` rendait `position_reached()` immédiatement vrai, déclenchant un STOP moteur quasiment instantané après la commande CLOSE.
+
+> **Correction :** Reset de `_slat_phase_cancelled`, `_slat_phase_running` et `_auto_stop_running` en début de `async_close_cover`, `async_open_cover` et `_async_set_position`. Si le TravelCalculator est déjà à 0%, la phase lames est exécutée directement dans `async_close_cover` sans passer par l'auto-updater.
+
+---
+
+**2 — État transitoire "ouvert" affiché pendant la phase de compression des lames**
+
+Symptôme constaté dans les logs HA :
+```
+00:00:22 → Volet Salon a été ouvert   ← bug !
+00:00:22 → Volet Salon se ferme
+00:00:25 → Volet Salon a été fermé
+```
+
+Quand `position_reached()` passait à `True`, `is_traveling()` redevenait `False`. Pendant le court laps de temps avant que `auto_stop_if_necessary` marque `_slat_phase_running = True`, HA publiait un état incohérent : `is_closing = False`, `is_closed = False`, `position = 0%` → interprété comme **"ouvert"**.
+
+> **Correction :** `_slat_phase_running = True` est maintenant positionné **synchroniquement** dans `auto_updater_hook` avant `async_schedule_update_ha_state()`, éliminant l'état transitoire.
+
+---
+
+**3 — Race condition : plusieurs tâches `auto_stop_if_necessary` simultanées**
+
+`auto_stop_if_necessary` était créé comme nouvelle tâche asyncio toutes les 100 ms sans vérifier si une tâche précédente était encore en cours (pendant le `asyncio.sleep` de la phase lames). Plusieurs tâches pouvaient exécuter la phase concurremment, envoyer des commandes STOP en double ou corrompre les flags `_is_fully_closed` / `_going_to_fully_closed`.
+
+> **Correction :** Ajout d'un flag guard `_auto_stop_running`. Une seule tâche `auto_stop_if_necessary` à la fois. Le flag est libéré dans un bloc `try/finally`.
+
+---
+
+**4 — Migration YAML → UI : `TypeError: Type is not JSON serializable: Template`**
+
+Le validateur voluptuous `cv.template` convertit les valeurs de templates YAML en objets `Template`. Ces objets étaient stockés tels quels dans les options du config entry, rendant la persistance HA impossible (`json_bytes` ne sait pas sérialiser un objet `Template`). Cela provoquait également un `TypeError: Expected template to be a string` au prochain démarrage.
+
+> **Correction :** Conversion des objets `Template` en string brute (`v.template`) dans `async_setup_platform` avant stockage. Protection défensive dans `async_setup_entry` pour les entrées existantes corrompues.
+
+---
+
+### v2.6.3 et antérieures
+
+Voir l'historique des commits sur [GitHub](https://github.com/zeke45/home-assistant-custom-components-cover-time-based/commits/main).
 
 ---
 
