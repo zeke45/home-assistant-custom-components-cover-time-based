@@ -373,6 +373,7 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
         self._slat_phase_running: bool = False   # motor running during slat phase
         self._slat_phase_cancelled: bool = False # set by stop_cover to abort slat task
         self._going_to_fully_closed: bool = False  # True ↔ close_cover / set_position(0)
+        self._auto_stop_running: bool = False    # guard: only one auto_stop task at a time
 
         # Physical bypass detection — last action detected from relay state change
         self._last_physical_action: str | None = None      # "open" | "close" | "stop"
@@ -818,10 +819,46 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
 
     async def async_close_cover(self, **kwargs) -> None:
         _LOGGER.debug("async_close_cover")
+        # Nothing to do if already fully closed
+        if self._is_fully_closed:
+            _LOGGER.debug("async_close_cover :: already fully closed, skipping")
+            return
         self._position_uncertain = False
         # close_cover always goes fully closed (slat compression phase included)
         self._going_to_fully_closed = self._slat_compression_time_down > 0
+        # Reset slat-phase flags so a previous stop/cancel does not pollute this run
+        self._slat_phase_cancelled = False
+        self._slat_phase_running = False
+        self._auto_stop_running = False
+
         await self._async_apply_command_delay("async_close_cover")
+
+        # ── Special case: TC is already at 0 % but slat compression not done yet ──
+        # (e.g. previous close was interrupted before the slat phase finished)
+        # Starting start_travel_down(0→0) would make position_reached() True immediately,
+        # which would fire the slat phase after only 100 ms and send an unwanted STOP.
+        # → Run the slat compression phase inline right here instead.
+        if (
+            self._travel_calculator.current_position() == 0
+            and self._going_to_fully_closed
+            and not self._travel_calculator.is_traveling()
+        ):
+            _LOGGER.debug(
+                "async_close_cover :: already at ajouré (TC=0), running slat compression inline"
+            )
+            await self._async_handle_command(SERVICE_CLOSE_COVER)
+            self._slat_phase_running = True
+            self.async_write_ha_state()
+            await asyncio.sleep(self._slat_compression_time_down)
+            if not self._slat_phase_cancelled:
+                await self._async_handle_command(SERVICE_STOP_COVER)
+                self._is_fully_closed = True
+            self._slat_phase_running = False
+            self._slat_phase_cancelled = False
+            self._going_to_fully_closed = False
+            self.async_write_ha_state()
+            return
+
         self._travel_calculator.start_travel_down()
         self.start_auto_updater()
         await self._async_handle_command(SERVICE_CLOSE_COVER)
@@ -830,6 +867,9 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
         _LOGGER.debug("async_open_cover")
         self._position_uncertain = False
         self._going_to_fully_closed = False
+        # Reset slat-phase flags so a previous stop/cancel does not pollute this run
+        self._slat_phase_cancelled = False
+        self._auto_stop_running = False
         await self._async_apply_command_delay("async_open_cover")
 
         if self._is_fully_closed and self._slat_compression_time_up > 0:
@@ -983,6 +1023,9 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
             return
 
         self._position_uncertain = False
+        # Reset slat-phase flags so a previous stop/cancel does not pollute this run
+        self._slat_phase_cancelled = False
+        self._auto_stop_running = False
 
         if going_up:
             self._going_to_fully_closed = False
@@ -1049,10 +1092,23 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
 
     @callback
     def auto_updater_hook(self, now) -> None:
-        self.async_schedule_update_ha_state()
         if self.position_reached():
             self.stop_auto_updater()
-        self.hass.async_create_task(self.auto_stop_if_necessary())
+            # Pre-set _slat_phase_running synchronously so that the state update
+            # (scheduled below) never publishes a transient "open" state between
+            # TC.stop() (which makes is_traveling=False) and the async slat phase start.
+            if (
+                self._travel_calculator.current_position() == 0
+                and self._going_to_fully_closed
+                and self._slat_compression_time_down > 0
+                and not self._slat_phase_running
+            ):
+                self._slat_phase_running = True
+            # Guard: only create one auto_stop task at a time
+            if not self._auto_stop_running:
+                self._auto_stop_running = True
+                self.hass.async_create_task(self.auto_stop_if_necessary())
+        self.async_schedule_update_ha_state()
 
     def stop_auto_updater(self) -> None:
         if self._unsubscribe_auto_updater is not None:
@@ -1069,47 +1125,53 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
         - End positions (0 % or 100 %):    send stop only if send_stop_at_end is True.
         - Position 0 % + going_to_fully_closed: run slat compression phase first.
         """
-        if self.position_reached():
-            self._travel_calculator.stop()
-            current_position = self._travel_calculator.current_position()
+        try:
+            if self.position_reached():
+                self._travel_calculator.stop()
+                current_position = self._travel_calculator.current_position()
 
-            if (
-                current_position == 0
-                and self._going_to_fully_closed
-                and self._slat_compression_time_down > 0
-            ):
-                # --- Slat compression phase ---
-                _LOGGER.debug(
-                    "auto_stop_if_necessary :: ajouré reached, compressing slats (%ds)",
-                    self._slat_compression_time_down,
-                )
-                self._slat_phase_running = True
-                self.async_write_ha_state()
-                await asyncio.sleep(self._slat_compression_time_down)
-                if not self._slat_phase_cancelled:
+                if (
+                    current_position == 0
+                    and self._going_to_fully_closed
+                    and self._slat_compression_time_down > 0
+                ):
+                    # --- Slat compression phase ---
+                    # _slat_phase_running was already pre-set in auto_updater_hook to
+                    # avoid a transient "open" state; ensure it is True here as well
+                    # (safety net for callers that don't go through the hook).
+                    _LOGGER.debug(
+                        "auto_stop_if_necessary :: ajouré reached, compressing slats (%ds)",
+                        self._slat_compression_time_down,
+                    )
+                    self._slat_phase_running = True
+                    self.async_write_ha_state()
+                    await asyncio.sleep(self._slat_compression_time_down)
+                    if not self._slat_phase_cancelled:
+                        await self._async_handle_command(SERVICE_STOP_COVER)
+                        self._is_fully_closed = True
+                    self._slat_phase_running = False
+                    self._slat_phase_cancelled = False
+                    self._going_to_fully_closed = False
+                    self.async_write_ha_state()
+
+                elif 0 < current_position < 100:
+                    _LOGGER.debug(
+                        "auto_stop_if_necessary :: intermediate position %d%%, sending stop",
+                        current_position,
+                    )
                     await self._async_handle_command(SERVICE_STOP_COVER)
-                    self._is_fully_closed = True
-                self._slat_phase_running = False
-                self._slat_phase_cancelled = False
-                self._going_to_fully_closed = False
-                self.async_write_ha_state()
-
-            elif 0 < current_position < 100:
-                _LOGGER.debug(
-                    "auto_stop_if_necessary :: intermediate position %d%%, sending stop",
-                    current_position,
-                )
-                await self._async_handle_command(SERVICE_STOP_COVER)
-            elif self._send_stop_at_end:
-                _LOGGER.debug(
-                    "auto_stop_if_necessary :: end position, send_stop_at_end=True, sending stop"
-                )
-                await self._async_handle_command(SERVICE_STOP_COVER)
-            else:
-                _LOGGER.debug(
-                    "auto_stop_if_necessary :: end position, send_stop_at_end=False, skipping"
-                )
-                self.async_write_ha_state()
+                elif self._send_stop_at_end:
+                    _LOGGER.debug(
+                        "auto_stop_if_necessary :: end position, send_stop_at_end=True, sending stop"
+                    )
+                    await self._async_handle_command(SERVICE_STOP_COVER)
+                else:
+                    _LOGGER.debug(
+                        "auto_stop_if_necessary :: end position, send_stop_at_end=False, skipping"
+                    )
+                    self.async_write_ha_state()
+        finally:
+            self._auto_stop_running = False
 
     # ---- Low-level switch helpers ----
 
