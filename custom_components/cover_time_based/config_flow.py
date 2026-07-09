@@ -25,6 +25,9 @@ from .const import (
     CONF_STOP_SWITCH_ENTITY_ID,
     CONF_TRAVELLING_TIME_DOWN,
     CONF_TRAVELLING_TIME_UP,
+    CONF_TILT_TIME_OPEN,
+    CONF_TILT_TIME_CLOSE,
+    DEFAULT_TILT_TIME,
     CONTROL_TYPE_COVER,
     CONTROL_TYPE_SCRIPT,
     CONTROL_TYPE_SWITCH,
@@ -62,6 +65,10 @@ def _build_common_schema(data: dict) -> dict:
         vol.Optional(CONF_SLAT_COMPRESSION_TIME_DOWN, default=data.get(CONF_SLAT_COMPRESSION_TIME_DOWN, DEFAULT_SLAT_COMPRESSION_TIME_DOWN)):
             selector.NumberSelector(selector.NumberSelectorConfig(min=0, max=60, step=1, mode=selector.NumberSelectorMode.BOX)),
         vol.Optional(CONF_SLAT_COMPRESSION_TIME_UP, default=data.get(CONF_SLAT_COMPRESSION_TIME_UP, DEFAULT_SLAT_COMPRESSION_TIME_UP)):
+            selector.NumberSelector(selector.NumberSelectorConfig(min=0, max=60, step=1, mode=selector.NumberSelectorMode.BOX)),
+        vol.Optional(CONF_TILT_TIME_OPEN, default=data.get(CONF_TILT_TIME_OPEN, DEFAULT_TILT_TIME)):
+            selector.NumberSelector(selector.NumberSelectorConfig(min=0, max=60, step=1, mode=selector.NumberSelectorMode.BOX)),
+        vol.Optional(CONF_TILT_TIME_CLOSE, default=data.get(CONF_TILT_TIME_CLOSE, DEFAULT_TILT_TIME)):
             selector.NumberSelector(selector.NumberSelectorConfig(min=0, max=60, step=1, mode=selector.NumberSelectorMode.BOX)),
     }
 
@@ -195,7 +202,8 @@ def _normalize(user_input: dict) -> dict:
             user_input[key] = None
     for key in (CONF_TRAVELLING_TIME_DOWN, CONF_TRAVELLING_TIME_UP,
                 CONF_SWITCH_SUSTAINED_TIME, CONF_COMMAND_DELAY,
-                CONF_SLAT_COMPRESSION_TIME_DOWN, CONF_SLAT_COMPRESSION_TIME_UP):
+                CONF_SLAT_COMPRESSION_TIME_DOWN, CONF_SLAT_COMPRESSION_TIME_UP,
+                CONF_TILT_TIME_OPEN, CONF_TILT_TIME_CLOSE):
         if key in user_input:
             user_input[key] = int(user_input[key])
     return user_input
@@ -210,8 +218,45 @@ class CoverTimeBasedConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._name: str = ""
         self._control_type: str = CONTROL_TYPE_SWITCH_IMPULSE
 
+    async def async_step_import(self, import_data: dict):
+        """Handle import from YAML configuration (idempotent).
+
+        Called automatically by async_setup_platform for each YAML device.
+        Aborts if a config entry with the same device_id (unique_id) already exists.
+        """
+        device_id = import_data.get("device_id", "")
+        # Idempotency check: abort if already imported
+        for entry in self._async_current_entries():
+            if entry.unique_id == device_id:
+                return self.async_abort(reason="already_configured")
+
+        await self.async_set_unique_id(device_id)
+
+        name = import_data.get(CONF_NAME, device_id)
+        # Build options from import_data (exclude internal keys)
+        options = {
+            k: v for k, v in import_data.items()
+            if k not in ("device_id", CONF_NAME)
+        }
+        # Normalize legacy control_type=switch → switch_impulse / switch_sustained
+        control_type = options.get(CONF_CONTROL_TYPE, CONTROL_TYPE_SWITCH_IMPULSE)
+        if control_type == CONTROL_TYPE_SWITCH:
+            impulse = options.get(CONF_IMPULSE_MODE, True)
+            options[CONF_CONTROL_TYPE] = (
+                CONTROL_TYPE_SWITCH_IMPULSE if impulse else CONTROL_TYPE_SWITCH_SUSTAINED
+            )
+
+        import logging as _log  # noqa: PLC0415
+        _log.getLogger(__name__).info(
+            "cover_time_based: importing YAML device '%s' as UI config entry", device_id
+        )
+        return self.async_create_entry(
+            title=name,
+            data={CONF_NAME: name},
+            options=options,
+        )
+
     async def async_step_user(self, user_input=None):
-        """Step 1: name + control type."""
         errors = {}
         if user_input is not None:
             self._name = user_input[CONF_NAME]

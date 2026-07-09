@@ -1,7 +1,7 @@
 # Cover Time Based Component
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
-![version](https://img.shields.io/badge/version-2.6.4-blue)
+![version](https://img.shields.io/badge/version-2.7.0-blue)
 ![maintained](https://img.shields.io/badge/maintained-yes-green)
 ![license](https://img.shields.io/badge/license-MIT-green)
 
@@ -30,6 +30,10 @@ Supports ON/OFF relays (switch), RF impulse scripts, and delegation to an existi
 - 🔀 **Control type change** from UI options without recreating the integration
 - 🪟 **Ajouré position** for fixed-slat shutters: `cover_time_based.set_ajoure` service + automatic `ajoure_position` attribute
 - 🔁 **Physical bypass detection** (switch mode): if the relay is triggered directly (wall button, remote), HA automatically tracks position
+- 🔄 **Cover delegation bypass detection**: if the delegated cover is moved from its native app, HA tracks position automatically
+- 🔀 **Tilt support** for venetian/orientable blinds: `tilt_time_open` / `tilt_time_close` + `open_cover_tilt`, `close_cover_tilt`, `set_cover_tilt_position` services
+- 🔧 **`set_known_position` service**: forces internal position without moving the cover (re-sync after RF desync or HA restart)
+- 📦 **Automatic YAML → UI migration**: on startup, each YAML device is offered as a UI config entry (idempotent)
 
 ---
 
@@ -70,6 +74,10 @@ From **Settings → Devices & Services → Cover Time Based → Configure**:
 ---
 
 ## 📝 YAML Configuration (legacy)
+
+> 💡 **Automatic migration to UI**: on HA startup, each YAML-configured device is automatically migrated to a UI config entry (via `SOURCE_IMPORT`). The migration is **idempotent** — it aborts silently if the entry already exists. Once migration is confirmed in **Settings → Devices & Services**, you can remove the YAML block from `configuration.yaml`.
+
+
 
 ### Switch mode (ON/OFF relay)
 
@@ -173,6 +181,8 @@ cover:
 | `command_delay` | int | `0` | Delay before sending command (ms, 0–10000) |
 | `slat_compression_time_down` | int | `0` | Slat compression duration at bottom of downward stroke (seconds). Enables ajouré position. |
 | `slat_compression_time_up` | int | `0` | Slat decompression duration at start of upward stroke (seconds). Usually ≥ `slat_compression_time_down`. |
+| `tilt_time_open` | int | `0` | Time to open orientable slats 0→100% (seconds). `0` = feature disabled. |
+| `tilt_time_close` | int | `0` | Time to close orientable slats 100→0% (seconds). `0` = feature disabled. |
 
 ---
 
@@ -187,7 +197,7 @@ In **switch** mode (impulse or sustained), the component monitors the state of o
 | Stop relay → ON | Position frozen immediately | Position frozen immediately |
 | Relay → OFF | Ignored (brief pulse) | Position frozen (motor stopped) |
 
-> ℹ️ **Script and cover modes**: automatic detection is not possible as these modes have no observable "motor running" state in HA. You can manually resync the position via `cover.set_cover_position`.
+> ℹ️ **Cover delegation mode**: the component now monitors state changes of the delegated cover entity. If it starts opening or closing externally (wall button, native app), position is tracked automatically. **Script mode**: automatic detection is not possible as scripts have no observable "motor running" state in HA.
 
 ---
 
@@ -199,6 +209,7 @@ In **switch** mode (impulse or sustained), the component monitors the state of o
 | `cover.close_cover` | Closes the cover |
 | `cover.stop_cover` | Stops the cover |
 | `cover.set_cover_position` | Sets cover to X% (e.g. 50%) |
+| `cover_time_based.set_known_position` | Forces internal position without moving the cover (re-sync). Field: `position` (0–100%). |
 | `cover_time_based.set_ajoure` | Moves cover to ajouré position (last slat on ground, light passes through). Requires `slat_compression_time_down > 0`. |
 
 ---
@@ -270,6 +281,10 @@ tap_action:
     entity_id: cover.living_room_cover
 ```
 
+> ℹ️ If `slat_compression_time_down` is `0` (default), the feature is disabled and the `set_ajoure` service will log a warning.
+
+> ⚠️ **Behavior after a stop during the slat phase**: if `stop_cover` is sent while `slat_phase_running = true`, the close is interrupted and `is_fully_closed` remains `false`. The next `close_cover` command restarts cleanly from scratch: it resets the internal state and re-runs the full sequence (travel down + slat compression).
+
 ---
 
 ## 🗂️ Code architecture
@@ -336,8 +351,60 @@ pytest
 
 ---
 
+## 🗒️ Changelog
+
+### v2.7.0 — Critical bugfixes: slat phase & YAML migration
+
+#### 🐛 Bugs fixed
+
+**1 — Spurious STOP sent 1-2s after relaunching `close_cover` (slat covers)**
+
+When a previous close was interrupted by `stop_cover`, the internal flag `_slat_phase_cancelled` was left as `True`. On the next `close_cover` call, the slat compression phase was silently aborted, `_is_fully_closed` was never set to `True`, and the cover was shown as **open at 0%** in HA.
+
+Additionally, if `slat_compression_time_down > 0` and the internal position was already at 0%, `start_travel_down()` made `position_reached()` return `True` immediately, triggering a motor STOP almost instantly after the CLOSE command.
+
+> **Fix:** Reset `_slat_phase_cancelled`, `_slat_phase_running` and `_auto_stop_running` at the start of `async_close_cover`, `async_open_cover` and `_async_set_position`. If the TravelCalculator is already at 0%, the slat phase is executed directly inline in `async_close_cover` without going through the auto-updater.
+
+---
+
+**2 — Transient "open" state published during slat compression phase**
+
+Symptom observed in HA logs:
+```
+00:00:22 → Cover Lounge has been opened   ← bug !
+00:00:22 → Cover Lounge is closing
+00:00:25 → Cover Lounge has been closed
+```
+
+When `position_reached()` became `True`, `is_traveling()` returned `False`. During the short window before `auto_stop_if_necessary` set `_slat_phase_running = True`, HA published an inconsistent state: `is_closing = False`, `is_closed = False`, `position = 0%` → interpreted as **"open"**.
+
+> **Fix:** `_slat_phase_running = True` is now set **synchronously** in `auto_updater_hook` before `async_schedule_update_ha_state()`, eliminating the transient state.
+
+---
+
+**3 — Race condition: multiple concurrent `auto_stop_if_necessary` tasks**
+
+`auto_stop_if_necessary` was spawned as a new asyncio task every 100 ms without checking if a previous task was still running (during the `asyncio.sleep` of the slat phase). Multiple tasks could concurrently enter the slat phase, send duplicate STOP commands, or corrupt `_is_fully_closed` / `_going_to_fully_closed` flags.
+
+> **Fix:** Added `_auto_stop_running` boolean guard. Only one `auto_stop_if_necessary` task runs at a time. The flag is always released in a `try/finally` block.
+
+---
+
+**4 — YAML → UI migration: `TypeError: Type is not JSON serializable: Template`**
+
+The voluptuous `cv.template` validator converts YAML template strings into `Template` objects at validation time. These objects were stored as-is in config entry options, making HA persistence fail (`json_bytes` cannot serialize a `Template` object). This also caused a `TypeError: Expected template to be a string` on next startup.
+
+> **Fix:** Template objects are converted back to raw strings (`v.template`) in `async_setup_platform` before being stored. Defensive `isinstance` check added in `async_setup_entry` for existing corrupted entries.
+
+---
+
+### v2.6.3 and earlier
+
+See commit history on [GitHub](https://github.com/zeke45/home-assistant-custom-components-cover-time-based/commits/main).
+
+---
+
 ## 📜 Credits
 
 Based on the original project by [@davidramosweb](https://github.com/davidramosweb/home-assistant-custom-components-cover-time-based).  
 Improvements inspired by [@barmazu](https://github.com/barmazu/home-assistant-custom-components-cover-rf-time-based).
-

@@ -1,5 +1,5 @@
 """Time-based travel position calculator (no Home Assistant dependency)."""
-from homeassistant.util import dt as dt_util
+import time
 
 
 class TravelStatus:
@@ -16,7 +16,9 @@ class TravelCalculator:
         self._travel_time_up: int = max(travel_time_up, 1)
         self._position: int = 100
         self._target_position: int = 100
-        self._travel_started_at = None
+        # Monotonic timestamp (seconds, float) — immune to wall-clock jumps
+        # (NTP resync, DST change) while a travel is in progress.
+        self._travel_started_at: float | None = None
         self._travel_direction: str = TravelStatus.DIRECTION_NONE
 
     @property
@@ -30,7 +32,7 @@ class TravelCalculator:
     def current_position(self) -> int:
         if self._travel_started_at is None:
             return self._position
-        elapsed = (dt_util.utcnow() - self._travel_started_at).total_seconds()
+        elapsed = time.monotonic() - self._travel_started_at
         if self._travel_direction == TravelStatus.DIRECTION_UP:
             diff = 100.0 * elapsed / self._travel_time_up
             pos = min(self._position + diff, 100.0)
@@ -42,7 +44,7 @@ class TravelCalculator:
     def start_travel(self, target_position: int) -> None:
         self._position = self.current_position()
         self._target_position = target_position
-        self._travel_started_at = dt_util.utcnow()
+        self._travel_started_at = time.monotonic()
         if target_position > self._position:
             self._travel_direction = TravelStatus.DIRECTION_UP
         else:
