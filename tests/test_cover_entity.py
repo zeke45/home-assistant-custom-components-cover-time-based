@@ -249,6 +249,49 @@ async def test_close_cover_already_at_zero_does_not_arm_spurious_stop():
     assert call.kwargs["service_data"]["entity_id"] == "switch.close"
 
 
+async def test_close_cover_retry_is_not_mistaken_for_physical_bypass():
+    """Regression: the zero-distance CLOSE retry never marks the
+    TravelCalculator as traveling (nothing to travel), so the close switch's
+    own state_changed event — fired as a side effect of OUR turn_on call —
+    must not be mistaken by the physical-bypass detector for an externally
+    triggered close. Otherwise the detector re-arms the exact same
+    zero-distance travel itself and fires a spurious STOP a moment later,
+    even after the fix in test_close_cover_already_at_zero_does_not_arm_spurious_stop."""
+    cover = make_cover(send_stop_at_end=True, stop_switch_entity_id="switch.stop")
+    cover._travel_calculator.set_position(0)
+
+    with freeze_time("2024-01-01 12:00:00", tick=True):
+        await cover.async_close_cover()
+
+        # Simulate HA delivering the close switch's own state_changed event
+        # shortly after our turn_on call — this is exactly what the physical
+        # bypass detector is subscribed to.
+        event = MagicMock()
+        event.data = {"entity_id": "switch.close", "new_state": MagicMock(state="on")}
+        cover._async_switch_state_changed(event)
+
+        assert not cover._travel_calculator.is_traveling(), (
+            "the echo of our own CLOSE command must not re-arm travel tracking"
+        )
+        assert cover._unsubscribe_auto_updater is None
+
+
+async def test_genuine_physical_close_is_still_detected():
+    """Make sure the echo suppression above doesn't break real bypass
+    detection: a close switch turning on WITHOUT a preceding close_cover()
+    call must still be tracked as an external trigger."""
+    cover = make_cover()
+    cover._travel_calculator.set_position(100)
+
+    with freeze_time("2024-01-01 12:00:00", tick=True):
+        event = MagicMock()
+        event.data = {"entity_id": "switch.close", "new_state": MagicMock(state="on")}
+        cover._async_switch_state_changed(event)
+
+        assert cover._travel_calculator.is_traveling()
+        assert cover._last_physical_action == "close"
+
+
 async def test_open_cover_already_at_hundred_does_not_arm_spurious_stop():
     """Symmetric case for open_cover at 100 %."""
     cover = make_cover(send_stop_at_end=True)

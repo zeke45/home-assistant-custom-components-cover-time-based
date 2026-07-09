@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from datetime import timedelta
 
 import voluptuous as vol
@@ -395,6 +396,15 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
         self._last_physical_action: str | None = None      # "open" | "close" | "stop"
         self._last_physical_action_at: str | None = None   # ISO timestamp
 
+        # Echo suppression for the physical-bypass detectors below: a command
+        # WE just sent (e.g. a zero-distance close/open resent as a retry/nudge,
+        # which never marks the TravelCalculator as "traveling" since the target
+        # is already reached) must not be mistaken for an externally-triggered
+        # movement, or the bypass handler re-arms the exact same zero-distance
+        # travel itself and fires a spurious STOP a moment later.
+        self._last_own_command_direction: str | None = None  # "open" | "close"
+        self._last_own_command_at: float | None = None       # time.monotonic()
+
         # Both directions: TravelCalculator uses the EFFECTIVE travel time only
         # (slat compression/decompression phases are excluded from position tracking)
         # → set_position(50 %) = truly 50 % of physical shutter travel in both directions
@@ -539,9 +549,16 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
                     self.async_write_ha_state()
                 return
 
-            # Only react if HA is not already tracking this direction
-            # (avoids double-trigger when HA itself turns on the switch)
-            if is_close_switch and not already_going_down:
+            # Only react if HA is not already tracking this direction, and
+            # this isn't the echo of a command we just sent ourselves (avoids
+            # double-trigger when HA itself turns on the switch — including
+            # for a zero-distance retry that never marks the TravelCalculator
+            # as traveling, see _is_echo_of_own_command)
+            if (
+                is_close_switch
+                and not already_going_down
+                and not self._is_echo_of_own_command("close")
+            ):
                 _LOGGER.debug(
                     "%s: physical close detected (switch %s ON) — tracking travel down",
                     self._name, entity_id,
@@ -559,7 +576,11 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
                 self.start_auto_updater()
                 self.async_write_ha_state()
 
-            elif is_open_switch and not already_going_up:
+            elif (
+                is_open_switch
+                and not already_going_up
+                and not self._is_echo_of_own_command("open")
+            ):
                 _LOGGER.debug(
                     "%s: physical open detected (switch %s ON) — tracking travel up",
                     self._name, entity_id,
@@ -619,7 +640,7 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
         )
 
         if new_val == "opening" and old_val != "opening":
-            if already_going_up:
+            if already_going_up or self._is_echo_of_own_command("open"):
                 return  # Our own command — skip
             _LOGGER.debug(
                 "%s: delegated cover %s started opening externally — tracking up",
@@ -639,7 +660,7 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
             self.async_write_ha_state()
 
         elif new_val == "closing" and old_val != "closing":
-            if already_going_down:
+            if already_going_down or self._is_echo_of_own_command("close"):
                 return  # Our own command — skip
             _LOGGER.debug(
                 "%s: delegated cover %s started closing externally — tracking down",
@@ -1330,9 +1351,39 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
 
     # ---- Command dispatcher ----
 
+    def _mark_own_command(self, direction: str) -> None:
+        """Record that WE are about to send an open/close command ourselves.
+
+        Checked by the physical-bypass detectors so a command we just sent
+        is never mistaken for an externally-triggered movement.
+        """
+        self._last_own_command_direction = direction
+        self._last_own_command_at = time.monotonic()
+
+    def _is_echo_of_own_command(self, direction: str, window: float = 2.0) -> bool:
+        """True if `direction` matches a command WE sent within `window` seconds.
+
+        Used instead of relying solely on TravelCalculator.is_traveling() to
+        detect "this is our own command, not a physical trigger" — that check
+        alone fails for zero-distance moves (already at target), since
+        is_traveling() is never True when the target is already reached, no
+        matter how the travel is started.
+        """
+        if (
+            self._last_own_command_direction != direction
+            or self._last_own_command_at is None
+        ):
+            return False
+        return (time.monotonic() - self._last_own_command_at) <= window
+
     async def _async_handle_command(self, command: str, *args) -> None:
         """Dispatch command to the appropriate backend (switch / script / cover)."""
         _LOGGER.debug("_async_handle_command :: %s via %s", command, self._control_type)
+
+        if command == SERVICE_CLOSE_COVER:
+            self._mark_own_command("close")
+        elif command == SERVICE_OPEN_COVER:
+            self._mark_own_command("open")
 
         if self._control_type == CONTROL_TYPE_COVER:
             await self._handle_command_cover(command)
