@@ -55,6 +55,7 @@ from .const import (
     CONF_TILT_TIME_OPEN,
     CONF_TILT_TIME_CLOSE,
     DEFAULT_TILT_TIME,
+    DOMAIN,
     CONTROL_TYPE_COVER,
     CONTROL_TYPE_SCRIPT,
     CONTROL_TYPE_SWITCH,
@@ -206,7 +207,6 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
 
     # Schedule migration to UI config entries
     from homeassistant.config_entries import SOURCE_IMPORT  # noqa: PLC0415
-    from .const import DOMAIN  # noqa: PLC0415
     for device_id, device_config in raw_devices.items():
         name = device_config.pop(CONF_NAME, device_id)
         # Voluptuous cv.template converts template strings to Template objects.
@@ -384,6 +384,13 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
         self._going_to_fully_closed: bool = False  # True ↔ close_cover / set_position(0)
         self._auto_stop_running: bool = False    # guard: only one auto_stop task at a time
 
+        # Tilt auto-stop guard/task (mirrors _auto_stop_running for the position side)
+        self._tilt_auto_stop_running: bool = False
+        self._tilt_auto_stop_task: asyncio.Task | None = None
+
+        # Background tasks tied to this entity's lifecycle (cancelled on removal/reload)
+        self._background_tasks: set[asyncio.Task] = set()
+
         # Physical bypass detection — last action detected from relay state change
         self._last_physical_action: str | None = None      # "open" | "close" | "stop"
         self._last_physical_action_at: str | None = None   # ISO timestamp
@@ -459,6 +466,12 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
                     self._name, entities_to_watch,
                 )
 
+        # ---- Cancel background work when the entity is removed/reloaded ----
+        # (integration reload on options update is common here — a sleeping
+        # slat-phase/auto-stop/tilt task must not keep running against a
+        # since-removed entity.)
+        self.async_on_remove(self._async_cleanup_on_remove)
+
         # ---- Subscribe to delegated cover state changes ----
         # In cover delegation mode, if the underlying cover is moved externally
         # (e.g. via its own remote or app), sync our position tracking.
@@ -522,9 +535,7 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
                     self._last_physical_action_at = dt_util.utcnow().isoformat()
                     self._travel_calculator.stop()
                     self.stop_auto_updater()
-                    self._going_to_fully_closed = False
-                    self._slat_phase_cancelled = True
-                    self._slat_phase_running = False
+                    self._cancel_current_travel()
                     self.async_write_ha_state()
                 return
 
@@ -541,6 +552,7 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
                     self._travel_calculator.stop()
                     self.stop_auto_updater()
                 self._position_uncertain = False
+                self._begin_new_travel()
                 self._going_to_fully_closed = self._slat_compression_time_down > 0
                 self._is_fully_closed = False
                 self._travel_calculator.start_travel_down()
@@ -558,6 +570,7 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
                     self._travel_calculator.stop()
                     self.stop_auto_updater()
                 self._position_uncertain = False
+                self._begin_new_travel()
                 self._going_to_fully_closed = False
                 self._is_fully_closed = False
                 self._travel_calculator.start_travel_up()
@@ -575,9 +588,7 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
                 self._last_physical_action_at = dt_util.utcnow().isoformat()
                 self._travel_calculator.stop()
                 self.stop_auto_updater()
-                self._going_to_fully_closed = False
-                self._slat_phase_cancelled = True
-                self._slat_phase_running = False
+                self._cancel_current_travel()
                 self.async_write_ha_state()
 
     @callback
@@ -620,6 +631,7 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
                 self._travel_calculator.stop()
                 self.stop_auto_updater()
             self._position_uncertain = False
+            self._begin_new_travel()
             self._going_to_fully_closed = False
             self._is_fully_closed = False
             self._travel_calculator.start_travel_up()
@@ -639,6 +651,7 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
                 self._travel_calculator.stop()
                 self.stop_auto_updater()
             self._position_uncertain = False
+            self._begin_new_travel()
             self._going_to_fully_closed = self._slat_compression_time_down > 0
             self._is_fully_closed = False
             self._travel_calculator.start_travel_down()
@@ -656,9 +669,7 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
                 self._last_physical_action_at = dt_util.utcnow().isoformat()
                 self._travel_calculator.stop()
                 self.stop_auto_updater()
-                self._going_to_fully_closed = False
-                self._slat_phase_cancelled = True
-                self._slat_phase_running = False
+                self._cancel_current_travel()
                 self.async_write_ha_state()
 
     def _handle_my_button(self) -> None:
@@ -666,6 +677,57 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
             _LOGGER.debug("_handle_my_button :: button stops cover")
             self._travel_calculator.stop()
             self.stop_auto_updater()
+
+    # ---- Flag / background-task lifecycle helpers ----
+    #
+    # These three methods are the single source of truth for the slat-phase
+    # flags (_slat_phase_running, _slat_phase_cancelled, _going_to_fully_closed,
+    # _auto_stop_running). Every command that can start or interrupt a travel
+    # MUST go through one of them instead of touching the flags directly —
+    # stray hand-written resets are exactly what caused the v2.7.0 spurious
+    # stop / transient-"open" / race-condition bugs.
+
+    def _begin_new_travel(self) -> None:
+        """Clear slat-phase/guard flags before starting a brand-new travel.
+
+        Called at the top of every command that can start a new motor
+        movement, so leftover flags from a previous (possibly cancelled)
+        run never leak into this one.
+        """
+        self._slat_phase_cancelled = False
+        self._slat_phase_running = False
+        self._auto_stop_running = False
+
+    def _cancel_current_travel(self) -> None:
+        """Signal any in-progress slat phase to abort and clear the flags."""
+        self._slat_phase_cancelled = True
+        self._slat_phase_running = False
+        self._going_to_fully_closed = False
+
+    def _finish_slat_phase(self) -> None:
+        """Clear slat-phase flags once a slat phase has ended (normally or cancelled)."""
+        self._slat_phase_running = False
+        self._slat_phase_cancelled = False
+        self._going_to_fully_closed = False
+
+    def _create_tracked_task(self, coro) -> asyncio.Task:
+        """Create an asyncio task tied to this entity's lifecycle.
+
+        Tracked tasks are cancelled automatically when the entity is removed
+        (see _async_cleanup_on_remove), so a sleeping background task never
+        outlives the entity it was created for (e.g. on integration reload).
+        """
+        task = self.hass.async_create_task(coro)
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
+        return task
+
+    @callback
+    def _async_cleanup_on_remove(self) -> None:
+        """Stop the auto-updater and cancel all tracked background tasks."""
+        self.stop_auto_updater()
+        for task in list(self._background_tasks):
+            task.cancel()
 
     # ---- HA properties ----
 
@@ -828,22 +890,22 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
 
     async def async_close_cover(self, **kwargs) -> None:
         _LOGGER.debug("async_close_cover")
-        # Nothing to do if already fully closed
-        if self._is_fully_closed:
-            _LOGGER.debug("async_close_cover :: already fully closed, skipping")
-            return
         self._position_uncertain = False
+        # Always re-attempt: never unconditionally refuse a close_cover just
+        # because a previous run believed it finished — if that belief was
+        # wrong (obstacle, desync, interrupted run), the user must be able to
+        # retrigger it from the same open/close controls instead of being
+        # silently ignored until they find the set_known_position service.
+        self._is_fully_closed = False
         # close_cover always goes fully closed (slat compression phase included)
         self._going_to_fully_closed = self._slat_compression_time_down > 0
-        # Reset slat-phase flags so a previous stop/cancel does not pollute this run
-        self._slat_phase_cancelled = False
-        self._slat_phase_running = False
-        self._auto_stop_running = False
+        self._begin_new_travel()
 
         await self._async_apply_command_delay("async_close_cover")
 
         # ── Special case: TC is already at 0 % but slat compression not done yet ──
-        # (e.g. previous close was interrupted before the slat phase finished)
+        # (e.g. previous close was interrupted before the slat phase finished,
+        # or this is a retry after a previous close that had already finished)
         # Starting start_travel_down(0→0) would make position_reached() True immediately,
         # which would fire the slat phase after only 100 ms and send an unwanted STOP.
         # → Run the slat compression phase inline right here instead.
@@ -862,10 +924,22 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
             if not self._slat_phase_cancelled:
                 await self._async_handle_command(SERVICE_STOP_COVER)
                 self._is_fully_closed = True
-            self._slat_phase_running = False
-            self._slat_phase_cancelled = False
-            self._going_to_fully_closed = False
+            self._finish_slat_phase()
             self.async_write_ha_state()
+            return
+
+        # ── No slat feature, already at 0 % ──
+        # Same zero-distance problem as above but without a slat phase to
+        # absorb it: starting a 0→0 travel would make position_reached()
+        # True on the very next 100 ms tick, firing an unwanted STOP right
+        # behind the CLOSE — which some RF/relay receivers interpret as a
+        # conflicting command and can visibly jog the motor. Resend the
+        # CLOSE command as a plain retry/nudge without arming the tracker.
+        if (
+            self._travel_calculator.current_position() == 0
+            and not self._travel_calculator.is_traveling()
+        ):
+            await self._async_handle_command(SERVICE_CLOSE_COVER)
             return
 
         self._travel_calculator.start_travel_down()
@@ -876,9 +950,7 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
         _LOGGER.debug("async_open_cover")
         self._position_uncertain = False
         self._going_to_fully_closed = False
-        # Reset slat-phase flags so a previous stop/cancel does not pollute this run
-        self._slat_phase_cancelled = False
-        self._auto_stop_running = False
+        self._begin_new_travel()
         await self._async_apply_command_delay("async_open_cover")
 
         if self._is_fully_closed and self._slat_compression_time_up > 0:
@@ -889,8 +961,7 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
             await self._async_handle_command(SERVICE_OPEN_COVER)
             await asyncio.sleep(self._slat_compression_time_up)
             if self._slat_phase_cancelled:
-                self._slat_phase_running = False
-                self._slat_phase_cancelled = False
+                self._finish_slat_phase()
                 self.async_write_ha_state()
                 return
             self._slat_phase_running = False
@@ -900,6 +971,15 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
             self.async_write_ha_state()
         else:
             self._is_fully_closed = False
+            # Already fully open: avoid arming the auto-stop for a
+            # zero-distance travel (see async_close_cover for the matching
+            # 0 % case) — just resend OPEN as a retry/nudge instead.
+            if (
+                self._travel_calculator.current_position() == 100
+                and not self._travel_calculator.is_traveling()
+            ):
+                await self._async_handle_command(SERVICE_OPEN_COVER)
+                return
             self._travel_calculator.start_travel_up()
             self.start_auto_updater()
             await self._async_handle_command(SERVICE_OPEN_COVER)
@@ -908,11 +988,23 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
         _LOGGER.debug("async_stop_cover")
         self._position_uncertain = False
         # Cancel any in-progress slat phase
-        self._slat_phase_cancelled = True
-        self._slat_phase_running = False
-        self._going_to_fully_closed = False
+        self._cancel_current_travel()
         await self._async_apply_command_delay("async_stop_cover")
         self._handle_my_button()
+        # Position and tilt share the same relay/switch — stop tracking both,
+        # otherwise the tilt calculator keeps believing it is still traveling
+        # and its own auto-stop task later sends a stale/duplicate STOP.
+        if self._tilt_enabled and self._tilt_calculator.is_traveling():
+            self._tilt_calculator.stop()
+            if self._tilt_auto_stop_task is not None:
+                # Reset the guard here rather than relying solely on
+                # _tilt_auto_stop's own `finally` — if the task is cancelled
+                # before its first iteration ever runs, that finally block
+                # never executes and _tilt_auto_stop_running would be stuck
+                # True forever, permanently blocking future tilt commands.
+                self._tilt_auto_stop_task.cancel()
+                self._tilt_auto_stop_task = None
+            self._tilt_auto_stop_running = False
         await self._async_handle_command(SERVICE_STOP_COVER)
 
     async def async_set_known_position(self, position: int) -> None:
@@ -926,9 +1018,7 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
         if self._travel_calculator.is_traveling():
             self._travel_calculator.stop()
         self.stop_auto_updater()
-        self._slat_phase_cancelled = True
-        self._slat_phase_running = False
-        self._going_to_fully_closed = False
+        self._cancel_current_travel()
         # Force position
         self._travel_calculator.set_position(position)
         self._position_uncertain = False
@@ -952,6 +1042,7 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
             return
         _LOGGER.debug("async_set_ajoure :: moving to ajouré (TC position 0%%)")
         # Do NOT set _going_to_fully_closed: stop exactly at ajouré
+        self._begin_new_travel()
         self._going_to_fully_closed = False
         self._position_uncertain = False
         current_position = self._travel_calculator.current_position()
@@ -998,6 +1089,7 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
         )
 
         going_up = tilt_position > current
+        await self._async_apply_command_delay("_async_set_tilt_position")
         # Send the appropriate brief command (same switches/scripts as position)
         if going_up:
             self._tilt_calculator.start_travel(tilt_position)
@@ -1006,16 +1098,26 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
             self._tilt_calculator.start_travel(tilt_position)
             await self._async_handle_command(SERVICE_CLOSE_COVER)
 
-        # Auto-stop: wait for tilt to reach target then stop
-        async def _tilt_auto_stop() -> None:
+        # Auto-stop: wait for tilt to reach target then stop. Guarded so a
+        # second tilt command issued before this one finishes (e.g. a slider
+        # dragged quickly) reuses the same loop — which already reacts to the
+        # updated target via start_travel() above — instead of spawning a
+        # second concurrent task that would send a duplicate STOP.
+        if not self._tilt_auto_stop_running:
+            self._tilt_auto_stop_running = True
+            self._tilt_auto_stop_task = self._create_tracked_task(self._tilt_auto_stop())
+
+    async def _tilt_auto_stop(self) -> None:
+        try:
             while self._tilt_calculator.is_traveling():
                 await asyncio.sleep(0.1)
                 self.async_write_ha_state()
             self._tilt_calculator.stop()
             await self._async_handle_command(SERVICE_STOP_COVER)
             self.async_write_ha_state()
-
-        self.hass.async_create_task(_tilt_auto_stop())
+        finally:
+            self._tilt_auto_stop_running = False
+            self._tilt_auto_stop_task = None
 
     async def _async_set_position(self, position: int) -> None:
         """Move the cover to the given position (0–100)."""
@@ -1032,9 +1134,7 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
             return
 
         self._position_uncertain = False
-        # Reset slat-phase flags so a previous stop/cancel does not pollute this run
-        self._slat_phase_cancelled = False
-        self._auto_stop_running = False
+        self._begin_new_travel()
 
         if going_up:
             self._going_to_fully_closed = False
@@ -1053,8 +1153,7 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
                 await self._async_handle_command(SERVICE_OPEN_COVER)
                 await asyncio.sleep(self._slat_compression_time_up)
                 if self._slat_phase_cancelled:
-                    self._slat_phase_running = False
-                    self._slat_phase_cancelled = False
+                    self._finish_slat_phase()
                     self.async_write_ha_state()
                     return
                 self._slat_phase_running = False
@@ -1082,8 +1181,22 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
     # ---- Command delay helper ----
 
     async def _async_apply_command_delay(self, caller: str = "") -> None:
-        """Wait for the configured command delay (ms) before issuing a command."""
-        if self._command_delay > 0:
+        """Wait for the configured command delay (ms) before issuing a command.
+
+        Serialized across ALL cover_time_based entities via a lock shared
+        in hass.data, not just awaited independently per-entity. A plain
+        per-entity sleep only shifts every entity's send time by the same
+        constant when several covers are commanded at once (e.g. "close all
+        covers"), so they still all fire together — it never staggers them
+        relative to each other. Queuing on a shared lock and holding it for
+        the sleep duration makes each queued entity wait its turn, actually
+        spacing consecutive sends apart by command_delay.
+        """
+        if self._command_delay <= 0:
+            return
+        domain_data = self.hass.data.setdefault(DOMAIN, {})
+        lock = domain_data.setdefault("_command_delay_lock", asyncio.Lock())
+        async with lock:
             _LOGGER.debug(
                 "%s :: waiting %d ms before sending command", caller, self._command_delay
             )
@@ -1116,7 +1229,7 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
             # Guard: only create one auto_stop task at a time
             if not self._auto_stop_running:
                 self._auto_stop_running = True
-                self.hass.async_create_task(self.auto_stop_if_necessary())
+                self._create_tracked_task(self.auto_stop_if_necessary())
         self.async_schedule_update_ha_state()
 
     def stop_auto_updater(self) -> None:
@@ -1158,9 +1271,7 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
                     if not self._slat_phase_cancelled:
                         await self._async_handle_command(SERVICE_STOP_COVER)
                         self._is_fully_closed = True
-                    self._slat_phase_running = False
-                    self._slat_phase_cancelled = False
-                    self._going_to_fully_closed = False
+                    self._finish_slat_phase()
                     self.async_write_ha_state()
 
                 elif 0 < current_position < 100:
@@ -1202,7 +1313,7 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
                     blocking=True,
                 )
 
-            self.hass.async_create_task(_turn_off_later())
+            self._create_tracked_task(_turn_off_later())
 
     async def _async_turn_off_switch(self, entity_id: str | None) -> None:
         if not entity_id:

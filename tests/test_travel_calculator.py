@@ -1,31 +1,19 @@
 """Unit tests for TravelCalculator."""
-from datetime import datetime, timezone
 from unittest.mock import patch
 
 import pytest
 
-# Patch dt_util before importing TravelCalculator (avoids homeassistant dependency at import)
-from unittest.mock import MagicMock
-import sys
-
-# Stub homeassistant.util.dt so TravelCalculator can be imported standalone
-dt_stub = MagicMock()
-_NOW = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
-dt_stub.utcnow.return_value = _NOW
-sys.modules.setdefault("homeassistant", MagicMock())
-sys.modules.setdefault("homeassistant.util", MagicMock())
-sys.modules["homeassistant.util.dt"] = dt_stub
-
-from custom_components.cover_time_based.travel_calculator import (  # noqa: E402
+from custom_components.cover_time_based.travel_calculator import (
     TravelCalculator,
     TravelStatus,
 )
 
+_NOW = 1_700_000_000.0  # arbitrary monotonic base
 
-def _now(offset_seconds: float = 0.0) -> datetime:
-    """Return a fake 'now' shifted by offset_seconds."""
-    from datetime import timedelta
-    return _NOW + timedelta(seconds=offset_seconds)
+
+def _now(offset_seconds: float = 0.0) -> float:
+    """Return a fake monotonic 'now' shifted by offset_seconds."""
+    return _NOW + offset_seconds
 
 
 # ---------------------------------------------------------------------------
@@ -70,38 +58,38 @@ class TestInitialState:
 class TestTravelDown:
     def test_starts_traveling_down(self):
         tc = make_tc()
-        with patch("homeassistant.util.dt.utcnow", return_value=_now(0)):
+        with patch("time.monotonic", return_value=_now(0)):
             tc.start_travel_down()
         assert tc.travel_direction == TravelStatus.DIRECTION_DOWN
 
     def test_position_after_half_time(self):
         tc = make_tc(down=20)
-        with patch("homeassistant.util.dt.utcnow", return_value=_now(0)):
+        with patch("time.monotonic", return_value=_now(0)):
             tc.start_travel_down()
-        with patch("homeassistant.util.dt.utcnow", return_value=_now(10)):
+        with patch("time.monotonic", return_value=_now(10)):
             pos = tc.current_position()
         assert pos == 50
 
     def test_position_clamped_at_0(self):
         tc = make_tc(down=20)
-        with patch("homeassistant.util.dt.utcnow", return_value=_now(0)):
+        with patch("time.monotonic", return_value=_now(0)):
             tc.start_travel_down()
-        with patch("homeassistant.util.dt.utcnow", return_value=_now(999)):
+        with patch("time.monotonic", return_value=_now(999)):
             pos = tc.current_position()
         assert pos == 0
 
     def test_position_reached_at_end(self):
         tc = make_tc(down=20)
-        with patch("homeassistant.util.dt.utcnow", return_value=_now(0)):
+        with patch("time.monotonic", return_value=_now(0)):
             tc.start_travel_down()
-        with patch("homeassistant.util.dt.utcnow", return_value=_now(20)):
+        with patch("time.monotonic", return_value=_now(20)):
             assert tc.position_reached()
 
     def test_is_closed_at_0(self):
         tc = make_tc(down=20)
-        with patch("homeassistant.util.dt.utcnow", return_value=_now(0)):
+        with patch("time.monotonic", return_value=_now(0)):
             tc.start_travel_down()
-        with patch("homeassistant.util.dt.utcnow", return_value=_now(20)):
+        with patch("time.monotonic", return_value=_now(20)):
             assert tc.is_closed()
 
 
@@ -113,34 +101,34 @@ class TestTravelUp:
     def test_starts_traveling_up(self):
         tc = make_tc()
         tc.set_position(0)
-        with patch("homeassistant.util.dt.utcnow", return_value=_now(0)):
+        with patch("time.monotonic", return_value=_now(0)):
             tc.start_travel_up()
         assert tc.travel_direction == TravelStatus.DIRECTION_UP
 
     def test_position_after_half_time(self):
         tc = make_tc(up=20)
         tc.set_position(0)
-        with patch("homeassistant.util.dt.utcnow", return_value=_now(0)):
+        with patch("time.monotonic", return_value=_now(0)):
             tc.start_travel_up()
-        with patch("homeassistant.util.dt.utcnow", return_value=_now(10)):
+        with patch("time.monotonic", return_value=_now(10)):
             pos = tc.current_position()
         assert pos == 50
 
     def test_position_clamped_at_100(self):
         tc = make_tc(up=20)
         tc.set_position(0)
-        with patch("homeassistant.util.dt.utcnow", return_value=_now(0)):
+        with patch("time.monotonic", return_value=_now(0)):
             tc.start_travel_up()
-        with patch("homeassistant.util.dt.utcnow", return_value=_now(999)):
+        with patch("time.monotonic", return_value=_now(999)):
             pos = tc.current_position()
         assert pos == 100
 
     def test_position_reached_at_100(self):
         tc = make_tc(up=20)
         tc.set_position(0)
-        with patch("homeassistant.util.dt.utcnow", return_value=_now(0)):
+        with patch("time.monotonic", return_value=_now(0)):
             tc.start_travel_up()
-        with patch("homeassistant.util.dt.utcnow", return_value=_now(20)):
+        with patch("time.monotonic", return_value=_now(20)):
             assert tc.position_reached()
 
 
@@ -151,29 +139,29 @@ class TestTravelUp:
 class TestTargetPosition:
     def test_travel_to_50_from_100(self):
         tc = make_tc(down=20)
-        with patch("homeassistant.util.dt.utcnow", return_value=_now(0)):
+        with patch("time.monotonic", return_value=_now(0)):
             tc.start_travel(50)
-        with patch("homeassistant.util.dt.utcnow", return_value=_now(10)):
+        with patch("time.monotonic", return_value=_now(10)):
             assert tc.position_reached()
             assert tc.current_position() == 50
 
     def test_travel_to_75_from_0(self):
         tc = make_tc(up=20)
         tc.set_position(0)
-        with patch("homeassistant.util.dt.utcnow", return_value=_now(0)):
+        with patch("time.monotonic", return_value=_now(0)):
             tc.start_travel(75)
-        with patch("homeassistant.util.dt.utcnow", return_value=_now(15)):
+        with patch("time.monotonic", return_value=_now(15)):
             assert tc.position_reached()
             assert tc.current_position() == 75
 
     def test_no_movement_when_already_at_target(self):
         tc = make_tc()
         tc.set_position(50)
-        with patch("homeassistant.util.dt.utcnow", return_value=_now(0)):
+        with patch("time.monotonic", return_value=_now(0)):
             tc.start_travel(50)
         # direction should be down (target == current triggers down branch)
         # but position_reached immediately
-        with patch("homeassistant.util.dt.utcnow", return_value=_now(0)):
+        with patch("time.monotonic", return_value=_now(0)):
             assert tc.position_reached()
 
 
@@ -184,9 +172,9 @@ class TestTargetPosition:
 class TestStop:
     def test_stop_freezes_position(self):
         tc = make_tc(down=20)
-        with patch("homeassistant.util.dt.utcnow", return_value=_now(0)):
+        with patch("time.monotonic", return_value=_now(0)):
             tc.start_travel_down()
-        with patch("homeassistant.util.dt.utcnow", return_value=_now(5)):
+        with patch("time.monotonic", return_value=_now(5)):
             tc.stop()
         assert tc.current_position() == 75
         assert not tc.is_traveling()
@@ -194,9 +182,9 @@ class TestStop:
 
     def test_stop_clears_started_at(self):
         tc = make_tc(down=20)
-        with patch("homeassistant.util.dt.utcnow", return_value=_now(0)):
+        with patch("time.monotonic", return_value=_now(0)):
             tc.start_travel_down()
-        with patch("homeassistant.util.dt.utcnow", return_value=_now(5)):
+        with patch("time.monotonic", return_value=_now(5)):
             tc.stop()
         assert tc._travel_started_at is None
 
@@ -209,18 +197,18 @@ class TestAsymmetricTimes:
     def test_down_25s_up_30s(self):
         tc = TravelCalculator(25, 30)
         tc.set_position(0)
-        with patch("homeassistant.util.dt.utcnow", return_value=_now(0)):
+        with patch("time.monotonic", return_value=_now(0)):
             tc.start_travel_up()
-        with patch("homeassistant.util.dt.utcnow", return_value=_now(15)):
+        with patch("time.monotonic", return_value=_now(15)):
             pos = tc.current_position()
         assert pos == 50  # 15/30 * 100 = 50
 
     def test_down_pure_time_with_slat(self):
         """Simulate pure_travel_time_down = 22 (25 - 3 slat compression)."""
         tc = TravelCalculator(22, 22)
-        with patch("homeassistant.util.dt.utcnow", return_value=_now(0)):
+        with patch("time.monotonic", return_value=_now(0)):
             tc.start_travel(50)
-        with patch("homeassistant.util.dt.utcnow", return_value=_now(11)):
+        with patch("time.monotonic", return_value=_now(11)):
             pos = tc.current_position()
         assert pos == 50
 
@@ -237,21 +225,31 @@ class TestEdgeCases:
 
     def test_is_traveling_false_after_position_reached(self):
         tc = make_tc(down=20)
-        with patch("homeassistant.util.dt.utcnow", return_value=_now(0)):
+        with patch("time.monotonic", return_value=_now(0)):
             tc.start_travel_down()
-        with patch("homeassistant.util.dt.utcnow", return_value=_now(20)):
+        with patch("time.monotonic", return_value=_now(20)):
             assert not tc.is_traveling()
 
     def test_multiple_start_travel_resets(self):
         tc = make_tc(down=20, up=20)
-        with patch("homeassistant.util.dt.utcnow", return_value=_now(0)):
+        with patch("time.monotonic", return_value=_now(0)):
             tc.start_travel_down()
-        with patch("homeassistant.util.dt.utcnow", return_value=_now(10)):
+        with patch("time.monotonic", return_value=_now(10)):
             tc.stop()
         assert tc.current_position() == 50
-        with patch("homeassistant.util.dt.utcnow", return_value=_now(10)):
+        with patch("time.monotonic", return_value=_now(10)):
             tc.start_travel_up()
-        with patch("homeassistant.util.dt.utcnow", return_value=_now(20)):
+        with patch("time.monotonic", return_value=_now(20)):
             pos = tc.current_position()
         assert pos == 100
 
+    def test_wall_clock_jump_does_not_affect_position(self):
+        """A system-clock change (NTP resync, DST) must not perturb the
+        elapsed-time calculation, since it now relies on time.monotonic()
+        rather than the wall clock."""
+        tc = make_tc(down=20)
+        with patch("time.monotonic", return_value=_now(0)):
+            tc.start_travel_down()
+        # Only the monotonic clock matters — no dependency on wall-clock time
+        with patch("time.monotonic", return_value=_now(10)):
+            assert tc.current_position() == 50
